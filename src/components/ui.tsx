@@ -1,8 +1,9 @@
-import type {
-  ButtonHTMLAttributes,
-  InputHTMLAttributes,
-  ReactNode,
-  SelectHTMLAttributes,
+import {
+  useState,
+  type ButtonHTMLAttributes,
+  type InputHTMLAttributes,
+  type ReactNode,
+  type SelectHTMLAttributes,
 } from 'react';
 import { buttonClasses, type ButtonVariant } from './button-styles';
 
@@ -174,17 +175,89 @@ export function SelectField({
   );
 }
 
-/** A short, monospaced rendering of an on-chain address. */
+/**
+ * A short, monospaced rendering of an on-chain address.
+ *
+ * The chip shows the ends because a person comparing two of them needs to
+ * tell them apart at a glance — but a truncated address is not an address,
+ * and for anyone reading the page rather than looking at it, this component
+ * is where the full value has to live. So the whole address is the chip's
+ * accessible name, the visible fragment is hidden from assistive tech so the
+ * two never read as a contradiction, and a copy button gives touch and
+ * keyboard users — for whom `title` never existed — the access the mouse
+ * user always had. (#11)
+ */
 export function AddressChip({ value, label }: { value: string; label?: string }) {
   return (
     <span className="inline-flex items-center gap-2">
       {label === undefined ? null : <span className="text-xs text-neutral-500">{label}</span>}
-      <code
-        title={value}
-        className="rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-xs dark:bg-neutral-800"
+      <span className="inline-flex items-center gap-0.5">
+        <code
+          aria-label={value}
+          title={value}
+          className="rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-xs dark:bg-neutral-800"
+        >
+          <span aria-hidden="true">
+            {value.slice(0, 6)}…{value.slice(-4)}
+          </span>
+        </code>
+        <CopyAddressButton value={value} />
+      </span>
+    </span>
+  );
+}
+
+/**
+ * Copies the full address, and says so either way.
+ *
+ * The outcome lives in a `role="status"` region, so it is announced without
+ * moving focus. The failure path borrows InvitePanel's reasoning: clipboard
+ * access can be refused — an insecure origin, a withheld permission — the
+ * address is selectable on screen, so a degraded path that admits it beats a
+ * button that appears to do nothing.
+ */
+function CopyAddressButton({ value }: { readonly value: string }) {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
+
+  async function copy(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(value);
+      setState('copied');
+    } catch {
+      setState('failed');
+    }
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      <button
+        type="button"
+        onClick={() => void copy()}
+        aria-label="Copy address"
+        className="rounded p-1 text-neutral-400 transition hover:text-neutral-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-200 dark:focus-visible:outline-neutral-100"
       >
-        {value.slice(0, 6)}…{value.slice(-4)}
-      </code>
+        {/* Two overlapping rounded rects: the glyph people already know as
+            "copy". Drawn rather than labelled, so the button's name comes
+            from aria-label alone and cannot disagree with the icon. */}
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 16 16"
+          className="size-3.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        >
+          <rect x="5.75" y="5.75" width="7.5" height="7.5" rx="1.5" />
+          <path d="M10.25 3.25h-7a1.5 1.5 0 0 0-1.5 1.5v7" strokeLinecap="round" />
+        </svg>
+      </button>
+      <span role="status" className="sr-only">
+        {state === 'copied'
+          ? 'Address copied to the clipboard.'
+          : state === 'failed'
+            ? 'The clipboard was not available. Select the address and copy it by hand.'
+            : ''}
+      </span>
     </span>
   );
 }
