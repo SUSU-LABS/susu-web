@@ -1,8 +1,9 @@
-import type {
-  ButtonHTMLAttributes,
-  InputHTMLAttributes,
-  ReactNode,
-  SelectHTMLAttributes,
+import {
+  useState,
+  type ButtonHTMLAttributes,
+  type InputHTMLAttributes,
+  type ReactNode,
+  type SelectHTMLAttributes,
 } from 'react';
 import { buttonClasses, type ButtonVariant } from './button-styles';
 
@@ -174,18 +175,77 @@ export function SelectField({
   );
 }
 
-/** A short, monospaced rendering of an on-chain address. */
+/** A short, monospaced rendering of an on-chain address with copy affordance and accessible name. */
 export function AddressChip({ value, label }: { value: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => {
+        setCopied(false);
+      }, 2000);
+    } catch {
+      // Clipboard access can be withheld or unavailable in non-secure origins.
+      setCopied(false);
+    }
+  }
+
   return (
-    <span className="inline-flex items-center gap-2">
+    <span className="inline-flex items-center gap-1.5">
       {label === undefined ? null : <span className="text-xs text-neutral-500">{label}</span>}
       <code
+        aria-label={value}
         title={value}
         className="rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-xs dark:bg-neutral-800"
       >
-        {value.slice(0, 6)}…{value.slice(-4)}
+        <span className="sr-only">{value}</span>
+        <span aria-hidden="true">
+          {value.slice(0, 6)}…{value.slice(-4)}
+        </span>
       </code>
+      <button
+        type="button"
+        onClick={() => void copy()}
+        aria-label={copied ? 'Copied address to clipboard' : 'Copy address to clipboard'}
+        title={copied ? 'Copied' : 'Copy address'}
+        className="inline-flex items-center justify-center rounded p-1 text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-900 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+      >
+        {copied ? <CheckIcon /> : <CopyIcon />}
+      </button>
     </span>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <svg
+      className="size-3.5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      className="size-3.5 text-emerald-600 dark:text-emerald-400"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
   );
 }
 
