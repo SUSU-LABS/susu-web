@@ -20,6 +20,7 @@
  * what happened to the request: the browser cancels its interest, not the
  * request, so the server may still have acted.
  */
+import { z } from 'zod';
 import { getEnv } from '../env';
 import { ApiError } from './errors';
 
@@ -56,7 +57,7 @@ export type ApiPage<T> = {
   readonly offset: number;
 };
 
-export type RequestOptions = {
+export type RequestOptions<T = unknown> = {
   readonly method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   /** Serialised as JSON. Omitted entirely when absent. */
   readonly body?: unknown;
@@ -64,6 +65,8 @@ export type RequestOptions = {
   readonly token?: string | undefined;
   /** Aborts the request. A cancelled request never resolves. */
   readonly signal?: AbortSignal | undefined;
+  /** Optional Zod schema to runtime-validate response payload. */
+  readonly schema?: z.ZodType<T> | undefined;
 };
 
 function url(path: string): string {
@@ -183,7 +186,11 @@ function pageOf(body: unknown): ApiPage<unknown> | undefined {
  * body by definition, so it resolves with `undefined` rather than failing to
  * parse.
  */
-export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+export async function apiRequest<T>(
+  path: string,
+  options: RequestOptions<T> = {},
+  schema?: z.ZodType<T>,
+): Promise<T> {
   const { status, body } = await send(path, options);
 
   if (status === 204) return undefined as T;
@@ -193,6 +200,19 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     // disagree about the contract, which is worth failing on rather than
     // returning `undefined` as though the call had succeeded.
     throw new ApiError(status, undefined, 'The server returned an unexpected body.');
+  }
+
+  const effectiveSchema = schema ?? options.schema;
+  if (effectiveSchema) {
+    const result = effectiveSchema.safeParse(body.data);
+    if (!result.success) {
+      throw new ApiError(
+        status,
+        undefined,
+        `The server returned an unexpected response shape: ${result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', ')}`,
+      );
+    }
+    return result.data;
   }
 
   return body.data as T;
@@ -206,13 +226,31 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
  */
 export async function apiRequestPage<T>(
   path: string,
-  options: RequestOptions = {},
+  options: RequestOptions<T> = {},
+  itemSchema?: z.ZodType<T>,
 ): Promise<ApiPage<T>> {
   const { status, body } = await send(path, options);
 
   const page = pageOf(body);
   if (page === undefined) {
     throw new ApiError(status, undefined, 'The server returned an unexpected page.');
+  }
+
+  const effectiveSchema = itemSchema ?? options.schema;
+  if (effectiveSchema) {
+    const validatedItems: T[] = [];
+    for (let i = 0; i < page.items.length; i++) {
+      const result = effectiveSchema.safeParse(page.items[i]);
+      if (!result.success) {
+        throw new ApiError(
+          status,
+          undefined,
+          `The server returned an unexpected item shape at index ${i}: ${result.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join(', ')}`,
+        );
+      }
+      validatedItems.push(result.data);
+    }
+    return { ...page, items: validatedItems };
   }
 
   return page as ApiPage<T>;
@@ -232,7 +270,8 @@ export async function apiRequestPage<T>(
  */
 export async function apiRequestPageBody<T>(
   path: string,
-  options: RequestOptions = {},
+  options: RequestOptions<T> = {},
+  itemSchema?: z.ZodType<T>,
 ): Promise<{ page: ApiPage<T>; body: Record<string, unknown> }> {
   const { status, body } = await send(path, options);
 
@@ -241,5 +280,23 @@ export async function apiRequestPageBody<T>(
     throw new ApiError(status, undefined, 'The server returned an unexpected page.');
   }
 
-  return { page: page as ApiPage<T>, body: body as Record<string, unknown> };
+  const effectiveSchema = itemSchema ?? options.schema;
+  let items = page.items as T[];
+  if (effectiveSchema) {
+    const validatedItems: T[] = [];
+    for (let i = 0; i < page.items.length; i++) {
+      const result = effectiveSchema.safeParse(page.items[i]);
+      if (!result.success) {
+        throw new ApiError(
+          status,
+          undefined,
+          `The server returned an unexpected item shape at index ${i}: ${result.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join(', ')}`,
+        );
+      }
+      validatedItems.push(result.data);
+    }
+    items = validatedItems;
+  }
+
+  return { page: { ...page, items }, body: body as Record<string, unknown> };
 }

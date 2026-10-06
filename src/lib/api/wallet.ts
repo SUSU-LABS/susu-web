@@ -18,22 +18,25 @@
  * the network and the nonce, so a signature cannot be replayed into a different
  * account, network or request. It is not a transaction and cannot move funds.
  */
+import { z } from 'zod';
 import { apiRequest } from './client';
 
 /** What the API hands back for a link attempt. */
-export type WalletNonce = {
+export const walletNonceSchema = z.object({
   /** Opaque; sent back with the signature. */
-  readonly nonce: string;
+  nonce: z.string(),
   /** The exact text the wallet must sign, byte for byte. */
-  readonly message: string;
+  message: z.string(),
   /** ISO 8601. After this the nonce is refused and a new one is needed. */
-  readonly expiresAt: string;
-};
+  expiresAt: z.string(),
+});
+export type WalletNonce = z.infer<typeof walletNonceSchema>;
 
 /** The result of a successful link: the binding now on record. */
-export type LinkedWallet = {
-  readonly walletAddress: string;
-};
+export const linkedWalletSchema = z.object({
+  walletAddress: z.string(),
+});
+export type LinkedWallet = z.infer<typeof linkedWalletSchema>;
 
 /** Asks for something to sign, for one address. */
 export async function requestWalletNonce(address: string, token: string): Promise<WalletNonce> {
@@ -41,6 +44,7 @@ export async function requestWalletNonce(address: string, token: string): Promis
     method: 'POST',
     token,
     body: { address },
+    schema: walletNonceSchema,
   });
 }
 
@@ -60,5 +64,6 @@ export async function verifyWalletLink(
     method: 'POST',
     token,
     body: { address: input.address, nonce: input.nonce, signature: input.signature },
+    schema: linkedWalletSchema,
   });
 }
