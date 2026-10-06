@@ -1,10 +1,12 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { expect } from 'storybook/test';
 import { AddressChip } from '../src/components/ui';
 
 /**
  * Addresses in this app are 56 characters and are read by people comparing two
  * of them. The chip shows the ends, which is enough to tell one from another,
- * and keeps the whole value in `title` so the mouse user has the rest.
+ * while exposing the full 56-character value to assistive tech via `aria-label`
+ * and visually-hidden text. It also provides a one-click copy-to-clipboard affordance.
  *
  * The values below are the Testnet deployments recorded in the project's own
  * configuration (`.env.example` and `susu-contracts/docs/TESTNET.md`). Contract
@@ -47,4 +49,18 @@ export const Compared: Story = {
       <AddressChip value="CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA" label="USDC" />
     </div>
   ),
+};
+
+/**
+ * Asserts that assistive tech receives the full 56-character address as the
+ * accessible name of the code element rather than the truncated slice.
+ */
+export const AccessibleName: Story = {
+  args: { value: 'CCC7KAX4V4GJD6FVG6GSYQ4I2D2B3CWEOQMIX6YM4QBGXTA6INCGRUYC' },
+  play: async ({ canvasElement }) => {
+    const code = canvasElement.querySelector('code');
+    await expect(code).toHaveAccessibleName(
+      'CCC7KAX4V4GJD6FVG6GSYQ4I2D2B3CWEOQMIX6YM4QBGXTA6INCGRUYC',
+    );
+  },
 };
