@@ -4,6 +4,7 @@ import { useDeleteAccount, useLinkWallet, useMe, useUpdateProfile } from '@/lib/
 import { apiErrorMessage } from '@/lib/api/errors';
 import { useAuth } from '@/lib/auth/context';
 import { signOutOtherSessions, updatePassword } from '@/lib/auth/actions';
+import { newPasswordSchema, resetPasswordSchema, validate } from '@/lib/auth/validation';
 import { useStellar } from '@/lib/stellar/hooks';
 import {
   avatarProblemMessage,
@@ -283,24 +284,35 @@ function WalletSection({ account }: { account: Account }) {
   );
 }
 
-function PasswordSection() {
+export function PasswordSection() {
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [pending, setPending] = useState(false);
   const [done, setDone] = useState(false);
   const [problem, setProblem] = useState<string | undefined>(undefined);
 
-  const tooShort = password !== '' && password.length < 8;
+  const validation = validate(resetPasswordSchema, {
+    password,
+    confirmPassword: confirmation,
+  });
+
+  const passwordError =
+    password !== ''
+      ? newPasswordSchema.safeParse(password).error?.issues[0]?.message
+      : undefined;
+
   const mismatch = confirmation !== '' && confirmation !== password;
-  const canSubmit = password.length >= 8 && confirmation === password && !pending;
+  const canSubmit = validation.ok && !pending;
 
   async function onSubmit(): Promise<void> {
+    if (!validation.ok) return;
+
     setProblem(undefined);
     setDone(false);
     setPending(true);
 
     try {
-      const result = await updatePassword(password);
+      const result = await updatePassword(validation.values.password);
       if (!result.ok) {
         setProblem(result.error.message);
         return;
@@ -342,7 +354,7 @@ function PasswordSection() {
           type="password"
           autoComplete="new-password"
           value={password}
-          error={tooShort ? 'Use at least 8 characters.' : undefined}
+          error={passwordError}
           onChange={(event) => setPassword(event.target.value)}
         />
         <Field
