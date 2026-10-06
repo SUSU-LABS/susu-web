@@ -11,20 +11,22 @@
  * The unread count comes back with the page rather than from a second endpoint,
  * because the API includes it in the same answer.
  */
+import { z } from 'zod';
 import { apiRequest, apiRequestPageBody, type ApiPage } from './client';
 
-export type Notification = {
-  readonly id: string;
+export const notificationSchema = z.object({
+  id: z.string(),
   /** The API's own kind, for grouping and iconography. Not an open set to render. */
-  readonly kind: string;
-  readonly title: string;
-  readonly body: string | null;
+  kind: z.string(),
+  title: z.string(),
+  body: z.string().nullable(),
   /** Whatever the writer attached — usually the group and the transaction. */
-  readonly data: unknown;
+  data: z.unknown(),
   /** ISO 8601, or `null` while unread. */
-  readonly readAt: string | null;
-  readonly createdAt: string;
-};
+  readAt: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type Notification = z.infer<typeof notificationSchema>;
 
 /** A page of notifications, with how many are unread overall. */
 export type NotificationPage = ApiPage<Notification> & {
@@ -51,7 +53,11 @@ export async function listNotifications(
 
   const { page, body } = await apiRequestPageBody<Notification>(
     `notifications${encoded === '' ? '' : `?${encoded}`}`,
-    { token, ...(signal ? { signal } : {}) },
+    {
+      token,
+      ...(signal ? { signal } : {}),
+      schema: notificationSchema,
+    },
   );
 
   // A missing or malformed count is reported as zero rather than as `NaN`: a badge

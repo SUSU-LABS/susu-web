@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from './errors';
 
 const ENV = {
   VITE_APP_URL: 'http://localhost:5173',
@@ -100,24 +101,27 @@ describe('listGroups', () => {
   });
 
   it('carries the page position through', async () => {
-    fetchMock.mockResolvedValue(okPage([SUMMARY], { limit: 5, offset: 10, hasMore: true }));
+    fetchMock.mockResolvedValue(okPage([], { limit: 10, offset: 30, hasMore: true }));
 
-    const page = await listGroups({ limit: 5, offset: 10 });
+    const page = await listGroups({ limit: 10, offset: 30 });
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      'https://api.example.test/api/v1/groups?limit=5&offset=10',
+      'https://api.example.test/api/v1/groups?limit=10&offset=30',
     );
-    expect(page).toMatchObject({ limit: 5, offset: 10, hasMore: true });
+    expect(page.hasMore).toBe(true);
+    expect(page.limit).toBe(10);
+    expect(page.offset).toBe(30);
   });
 
   it('omits absent filters rather than serialising them', async () => {
     fetchMock.mockResolvedValue(okPage([], { limit: 20, offset: 0, hasMore: false }));
 
-    // `?member=undefined` would fail the API's address pattern and report "no
-    // filter" as a 400.
-    await listGroups({ status: 'open' });
+    await listGroups({ status: 'active' });
 
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://api.example.test/api/v1/groups?status=open');
+    // `?status=active&member=undefined` would fail the API's address check.
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://api.example.test/api/v1/groups?status=active',
+    );
   });
 
   it('keeps amounts as strings so base units survive', async () => {
@@ -125,10 +129,34 @@ describe('listGroups', () => {
 
     const page = await listGroups();
 
-    // Ten million base units is one USDC at seven decimals. As a number this
+    // The indexer stores `10000000` for 1 USDC. Parsing that through `Number()`
     // would be exact and still wrong to do: the same expression at 2^53 is
     // silently lossy, and no caller can tell the two cases apart.
     expect(page.items[0]?.contributionAmount).toBe('10000000');
+  });
+
+  it('fails validation when contributionAmount is numeric rather than a string', async () => {
+    fetchMock.mockResolvedValue(
+      okPage([{ ...SUMMARY, contributionAmount: 10000000 }], {
+        limit: 20,
+        offset: 0,
+        hasMore: false,
+      }),
+    );
+
+    await expect(listGroups()).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('fails validation when status is an unknown string', async () => {
+    fetchMock.mockResolvedValue(
+      okPage([{ ...SUMMARY, status: 'unknown_status' }], {
+        limit: 20,
+        offset: 0,
+        hasMore: false,
+      }),
+    );
+
+    await expect(listGroups()).rejects.toBeInstanceOf(ApiError);
   });
 
   it('surfaces the API’s refusal', async () => {
@@ -177,16 +205,37 @@ describe('getGroup', () => {
       'https://api.example.test/api/v1/groups/C%2Bweird%2Faddress',
     );
   });
+
+  it('fails validation when group payload is malformed', async () => {
+    fetchMock.mockResolvedValue(
+      ok({ ...SUMMARY, status: 'invalid-status', members: [], rounds: [] }),
+    );
+
+    await expect(getGroup(GROUP)).rejects.toBeInstanceOf(ApiError);
+  });
 });
 
 describe('listActivity', () => {
   it('reads the event feed for a group', async () => {
     fetchMock.mockResolvedValue(
-      okPage([{ name: 'contribution', ledger: 4651300 }], {
-        limit: 20,
-        offset: 0,
-        hasMore: false,
-      }),
+      okPage(
+        [
+          {
+            eventIdentity: `${HASH}:0`,
+            name: 'contribution',
+            ledger: 4651300,
+            txIndex: 0,
+            eventIndex: 0,
+            txHash: HASH,
+            payload: {},
+          },
+        ],
+        {
+          limit: 20,
+          offset: 0,
+          hasMore: false,
+        },
+      ),
     );
 
     const page = await listActivity(GROUP);
@@ -195,6 +244,18 @@ describe('listActivity', () => {
       `https://api.example.test/api/v1/groups/${GROUP}/activity`,
     );
     expect(page.items[0]?.name).toBe('contribution');
+  });
+
+  it('fails validation when activity items are malformed', async () => {
+    fetchMock.mockResolvedValue(
+      okPage([{ name: 'contribution', ledger: 'not-a-number' }], {
+        limit: 20,
+        offset: 0,
+        hasMore: false,
+      }),
+    );
+
+    await expect(listActivity(GROUP)).rejects.toBeInstanceOf(ApiError);
   });
 });
 
@@ -235,6 +296,14 @@ describe('getTransactionReceipt', () => {
     // only to report it faithfully.
     await expect(getTransactionReceipt(HASH)).rejects.toMatchObject({ status: 404 });
   });
+
+  it('fails validation when receipt is malformed', async () => {
+    fetchMock.mockResolvedValue(
+      ok({ txHash: HASH, ledger: 'not-a-number', txIndex: 0, events: [] }),
+    );
+
+    await expect(getTransactionReceipt(HASH)).rejects.toBeInstanceOf(ApiError);
+  });
 });
 
 describe('looksLikeTransactionHash', () => {
@@ -262,6 +331,12 @@ describe('registerGroup', () => {
     expect(init.method).toBe('POST');
     expect(JSON.parse(String(init.body))).toEqual({ contractId: GROUP });
     expect(registered.expiresAt).toBe('2026-01-01T00:30:00.000Z');
+  });
+
+  it('fails validation when registered response is malformed', async () => {
+    fetchMock.mockResolvedValue(ok({ contractId: GROUP, expiresAt: 12345 }));
+
+    await expect(registerGroup(GROUP, 'a-token')).rejects.toBeInstanceOf(ApiError);
   });
 });
 

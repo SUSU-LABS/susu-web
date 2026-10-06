@@ -17,20 +17,22 @@
  * linked to that account, and have a different wallet connected right now. This
  * module reports the binding, never the connection.
  */
+import { z } from 'zod';
 import { apiRequest, apiRequestPage, type ApiPage } from './client';
-import type { ActivityRecord } from './groups';
+import { activityRecordSchema } from './groups';
 
 /** The account, as the API reports it. Nulls mean "not set", not "missing". */
-export type Account = {
-  readonly userId: string;
-  readonly displayName: string | null;
+export const accountSchema = z.object({
+  userId: z.string(),
+  displayName: z.string().nullable(),
   /** An object key in the profile bucket, never a URL. */
-  readonly avatarPath: string | null;
+  avatarPath: z.string().nullable(),
   /** The proved binding, or `null` if no wallet has been linked. */
-  readonly walletAddress: string | null;
-  readonly createdAt: string | null;
-  readonly updatedAt: string | null;
-};
+  walletAddress: z.string().nullable(),
+  createdAt: z.string().nullable(),
+  updatedAt: z.string().nullable(),
+});
+export type Account = z.infer<typeof accountSchema>;
 
 /**
  * The fields a user may change.
@@ -49,13 +51,18 @@ export type ProfileChanges = {
  * The same event the per-group list returns, plus `contractId` — a feed spans
  * groups, so a row without it could not be linked back to anything.
  */
-export type MemberActivityRecord = ActivityRecord & {
-  readonly contractId: string;
-};
+export const memberActivityRecordSchema = activityRecordSchema.extend({
+  contractId: z.string(),
+});
+export type MemberActivityRecord = z.infer<typeof memberActivityRecordSchema>;
 
 /** Reads the signed-in account. */
 export async function getMe(token: string, signal?: AbortSignal): Promise<Account> {
-  return apiRequest<Account>('me', { token, ...(signal ? { signal } : {}) });
+  return apiRequest<Account>('me', {
+    token,
+    ...(signal ? { signal } : {}),
+    schema: accountSchema,
+  });
 }
 
 /**
@@ -70,7 +77,12 @@ export async function updateMe(changes: ProfileChanges, token: string): Promise<
   if (changes.displayName !== undefined) body.displayName = changes.displayName;
   if (changes.avatarPath !== undefined) body.avatarPath = changes.avatarPath;
 
-  return apiRequest<Account>('me', { method: 'PATCH', token, body });
+  return apiRequest<Account>('me', {
+    method: 'PATCH',
+    token,
+    body,
+    schema: accountSchema,
+  });
 }
 
 /**
@@ -103,5 +115,6 @@ export async function listMyActivity(
   return apiRequestPage<MemberActivityRecord>(`me/activity${encoded === '' ? '' : `?${encoded}`}`, {
     token,
     ...(signal ? { signal } : {}),
+    schema: memberActivityRecordSchema,
   });
 }

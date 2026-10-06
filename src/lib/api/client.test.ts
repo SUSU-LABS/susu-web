@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { apiRequest, apiRequestPage } from './client';
+import { z } from 'zod';
+import { apiRequest, apiRequestPage, apiRequestPageBody } from './client';
 import { ApiError, apiErrorMessage, isRetryableApiError } from './errors';
 
 /**
@@ -259,5 +260,64 @@ describe('isRetryableApiError', () => {
 
   it('does not treat a cancellation as retryable', () => {
     expect(isRetryableApiError(new DOMException('aborted', 'AbortError'))).toBe(false);
+  });
+});
+
+describe('runtime schema validation', () => {
+  const itemSchema = z.object({
+    id: z.string(),
+    count: z.number(),
+  });
+
+  it('validates apiRequest payload with provided schema', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { data: { id: 'test-1', count: 42 } }));
+
+    const result = await apiRequest('test', { schema: itemSchema });
+    expect(result.id).toBe('test-1');
+    expect(result.count).toBe(42);
+  });
+
+  it('throws ApiError when apiRequest payload violates schema', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { data: { id: 'test-1', count: 'not-a-number' } }));
+
+    await expect(apiRequest('test', { schema: itemSchema })).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('validates each page item with item schema in apiRequestPage', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'test-1', count: 1 }],
+        page: { limit: 10, offset: 0, hasMore: false },
+      }),
+    );
+
+    const page = await apiRequestPage('test', { schema: itemSchema });
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]?.count).toBe(1);
+  });
+
+  it('throws ApiError when an item in apiRequestPage violates schema', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'test-1', count: 'invalid' }],
+        page: { limit: 10, offset: 0, hasMore: false },
+      }),
+    );
+
+    await expect(apiRequestPage('test', { schema: itemSchema })).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('validates page items in apiRequestPageBody with schema', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'test-1', count: 5 }],
+        page: { limit: 10, offset: 0, hasMore: false },
+        extraField: 'hello',
+      }),
+    );
+
+    const { page, body } = await apiRequestPageBody('test', { schema: itemSchema });
+    expect(page.items[0]?.id).toBe('test-1');
+    expect(body.extraField).toBe('hello');
   });
 });

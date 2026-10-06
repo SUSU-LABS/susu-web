@@ -13,25 +13,28 @@
  * query string so it does not land in server logs, and never stored — the API
  * cannot return it after creation, so there is nothing to store.
  */
+import { z } from 'zod';
 import { apiRequest } from './client';
 
 /** Where a shared invite link points. */
 export const INVITE_PATH_PREFIX = '/join/';
 
-export type Invite = {
-  readonly code: string;
-  readonly groupContractId: string;
+export const inviteSchema = z.object({
+  code: z.string(),
+  groupContractId: z.string(),
   /** ISO 8601, or `null` when the invite does not expire. */
-  readonly expiresAt: string | null;
-  readonly maxUses: number | null;
-  readonly uses: number;
-};
+  expiresAt: z.string().nullable(),
+  maxUses: z.number().nullable(),
+  uses: z.number(),
+});
+export type Invite = z.infer<typeof inviteSchema>;
 
 /** What redeeming a code reports: which group the code admits to. */
-export type RedeemedInvite = {
-  readonly groupContractId: string;
-  readonly inviteId: string;
-};
+export const redeemedInviteSchema = z.object({
+  groupContractId: z.string(),
+  inviteId: z.string(),
+});
+export type RedeemedInvite = z.infer<typeof redeemedInviteSchema>;
 
 export type CreateInviteInput = {
   readonly groupContractId: string;
@@ -53,6 +56,7 @@ export async function createInvite(input: CreateInviteInput, token: string): Pro
       ...(input.expiresInHours === undefined ? {} : { expiresInHours: input.expiresInHours }),
       ...(input.maxUses === undefined ? {} : { maxUses: input.maxUses }),
     },
+    schema: inviteSchema,
   });
 }
 
@@ -73,6 +77,7 @@ export async function redeemInvite(code: string, token: string): Promise<Redeeme
     method: 'POST',
     token,
     body: { code },
+    schema: redeemedInviteSchema,
   });
 }
 

@@ -25,107 +25,118 @@
  * into a number here would undo that at the last step. Formatting is
  * `formatUsdc`'s job.
  */
+import { z } from 'zod';
 import { apiRequest, apiRequestPage, type ApiPage } from './client';
 import { getAccessToken } from './token';
 
 /** The statuses the contract uses. Not an open set: the API rejects others. */
-export type GroupStatus = 'open' | 'active' | 'completed';
+export const groupStatusSchema = z.enum(['open', 'active', 'completed']);
+export type GroupStatus = z.infer<typeof groupStatusSchema>;
 
-export type GroupSummary = {
-  readonly contractId: string;
-  readonly factoryContractId: string;
+export const groupSummarySchema = z.object({
+  contractId: z.string(),
+  factoryContractId: z.string(),
   /** The factory's sequential id, unique per factory. */
-  readonly groupId: number;
-  readonly creator: string;
+  groupId: z.number(),
+  creator: z.string(),
   /** The SAC the group settles in — recorded, not assumed to be USDC. */
-  readonly token: string;
+  token: z.string(),
   /** Base units, as a string. */
-  readonly contributionAmount: string;
-  readonly memberCapacity: number;
-  readonly createdLedger: number;
-  readonly status: GroupStatus;
-  readonly memberCount: number;
-  readonly currentRound: number;
-  readonly completedRounds: number;
+  contributionAmount: z.string(),
+  memberCapacity: z.number(),
+  createdLedger: z.number(),
+  status: groupStatusSchema,
+  memberCount: z.number(),
+  currentRound: z.number(),
+  completedRounds: z.number(),
   /** Base units, as a string. */
-  readonly contributedTotal: string;
-  readonly paidOutTotal: string;
-  readonly feeTotal: string;
+  contributedTotal: z.string(),
+  paidOutTotal: z.string(),
+  feeTotal: z.string(),
   /** The highest ledger any of this group's events came from; 0 before any. */
-  readonly lastEventLedger: number;
-};
+  lastEventLedger: z.number(),
+});
+export type GroupSummary = z.infer<typeof groupSummarySchema>;
 
-export type GroupMember = {
-  readonly member: string;
+export const groupMemberSchema = z.object({
+  member: z.string(),
   /** 1-based join order, as the contract assigned it. */
-  readonly position: number;
-  readonly joinedLedger: number;
-};
+  position: z.number(),
+  joinedLedger: z.number(),
+});
+export type GroupMember = z.infer<typeof groupMemberSchema>;
 
-export type GroupRound = {
-  readonly round: number;
-  readonly contributionCount: number;
+export const groupRoundSchema = z.object({
+  round: z.number(),
+  contributionCount: z.number(),
   /** Base units contributed this round, as a string. */
-  readonly contributed: string;
+  contributed: z.string(),
   /** Base units paid out, or `null` if the round has not paid. */
-  readonly payout: string | null;
-  readonly recipient: string | null;
-  readonly fee: string | null;
-};
+  payout: z.string().nullable(),
+  recipient: z.string().nullable(),
+  fee: z.string().nullable(),
+});
+export type GroupRound = z.infer<typeof groupRoundSchema>;
 
-export type GroupDetail = GroupSummary & {
-  readonly members: readonly GroupMember[];
-  readonly rounds: readonly GroupRound[];
-};
+export const groupDetailSchema = groupSummarySchema.extend({
+  members: z.array(groupMemberSchema),
+  rounds: z.array(groupRoundSchema),
+});
+export type GroupDetail = z.infer<typeof groupDetailSchema>;
 
-export type ContributionRecord = {
-  readonly eventIdentity: string;
-  readonly member: string;
-  readonly round: number;
+export const contributionRecordSchema = z.object({
+  eventIdentity: z.string(),
+  member: z.string(),
+  round: z.number(),
   /** Base units, as a string. */
-  readonly amount: string;
-  readonly ledger: number;
-  readonly txHash: string;
-};
+  amount: z.string(),
+  ledger: z.number(),
+  txHash: z.string(),
+});
+export type ContributionRecord = z.infer<typeof contributionRecordSchema>;
 
-export type PayoutRecord = {
-  readonly eventIdentity: string;
-  readonly recipient: string;
-  readonly round: number;
+export const payoutRecordSchema = z.object({
+  eventIdentity: z.string(),
+  recipient: z.string(),
+  round: z.number(),
   /** Base units, net of the protocol fee, as a string. */
-  readonly recipientAmount: string;
-  readonly ledger: number;
-  readonly txHash: string;
-};
+  recipientAmount: z.string(),
+  ledger: z.number(),
+  txHash: z.string(),
+});
+export type PayoutRecord = z.infer<typeof payoutRecordSchema>;
 
-export type ActivityRecord = {
-  readonly eventIdentity: string;
-  readonly name: string;
-  readonly ledger: number;
-  readonly txIndex: number;
-  readonly eventIndex: number;
-  readonly txHash: string;
+export const activityRecordSchema = z.object({
+  eventIdentity: z.string(),
+  name: z.string(),
+  ledger: z.number(),
+  txIndex: z.number(),
+  eventIndex: z.number(),
+  txHash: z.string(),
   /** The decoded fields, exactly as the indexer's decoder produced them. */
-  readonly payload: unknown;
-};
+  payload: z.unknown(),
+});
+export type ActivityRecord = z.infer<typeof activityRecordSchema>;
 
-export type TransactionEvent = {
-  readonly eventIdentity: string;
+export const transactionEventSchema = z.object({
+  eventIdentity: z.string(),
   /** The decoded event name. */
-  readonly name: string;
+  name: z.string(),
   /** The contract that emitted it, so a multi-contract transaction reads. */
-  readonly contractId: string;
-  readonly eventIndex: number;
-  readonly payload: unknown;
-};
+  contractId: z.string(),
+  eventIndex: z.number(),
+  payload: z.unknown(),
+});
+export type TransactionEvent = z.infer<typeof transactionEventSchema>;
 
-export type TransactionReceipt = {
-  readonly txHash: string;
-  readonly ledger: number;
-  readonly txIndex: number;
+export const transactionReceiptSchema = z.object({
+  txHash: z.string(),
+  ledger: z.number(),
+  txIndex: z.number(),
   /** In the order the contract emitted them. */
-  readonly events: readonly TransactionEvent[];
-};
+  events: z.array(transactionEventSchema),
+});
+export type TransactionReceipt = z.infer<typeof transactionReceiptSchema>;
 
 export type ListGroupsQuery = {
   readonly status?: GroupStatus;
@@ -174,7 +185,10 @@ export async function listGroups(
     creator: query.creator,
     ...pageParams(query),
   });
-  return apiRequestPage<GroupSummary>(`groups${search}`, { ...(signal ? { signal } : {}) });
+  return apiRequestPage<GroupSummary>(`groups${search}`, {
+    ...(signal ? { signal } : {}),
+    schema: groupSummarySchema,
+  });
 }
 
 /**
@@ -187,6 +201,7 @@ export async function listGroups(
 export async function getGroup(contractId: string, signal?: AbortSignal): Promise<GroupDetail> {
   return apiRequest<GroupDetail>(`groups/${encodeURIComponent(contractId)}`, {
     ...(signal ? { signal } : {}),
+    schema: groupDetailSchema,
   });
 }
 
@@ -199,7 +214,10 @@ export async function listContributions(
   const search = queryString(pageParams(page));
   return apiRequestPage<ContributionRecord>(
     `groups/${encodeURIComponent(contractId)}/contributions${search}`,
-    { ...(signal ? { signal } : {}) },
+    {
+      ...(signal ? { signal } : {}),
+      schema: contributionRecordSchema,
+    },
   );
 }
 
@@ -212,6 +230,7 @@ export async function listPayouts(
   const search = queryString(pageParams(page));
   return apiRequestPage<PayoutRecord>(`groups/${encodeURIComponent(contractId)}/payouts${search}`, {
     ...(signal ? { signal } : {}),
+    schema: payoutRecordSchema,
   });
 }
 
@@ -224,7 +243,10 @@ export async function listActivity(
   const search = queryString(pageParams(page));
   return apiRequestPage<ActivityRecord>(
     `groups/${encodeURIComponent(contractId)}/activity${search}`,
-    { ...(signal ? { signal } : {}) },
+    {
+      ...(signal ? { signal } : {}),
+      schema: activityRecordSchema,
+    },
   );
 }
 
@@ -245,6 +267,7 @@ export async function getTransactionReceipt(
 ): Promise<TransactionReceipt> {
   return apiRequest<TransactionReceipt>(`transactions/${encodeURIComponent(txHash)}`, {
     ...(signal ? { signal } : {}),
+    schema: transactionReceiptSchema,
   });
 }
 
@@ -254,11 +277,12 @@ export function looksLikeTransactionHash(value: string): boolean {
 }
 
 /** What the API reports about a claim: the address, and when it lapses. */
-export type RegisteredGroup = {
-  readonly contractId: string;
+export const registeredGroupSchema = z.object({
+  contractId: z.string(),
   /** ISO 8601. After this, only the index can vouch for the address. */
-  readonly expiresAt: string;
-};
+  expiresAt: z.string(),
+});
+export type RegisteredGroup = z.infer<typeof registeredGroupSchema>;
 
 /**
  * Tells the API that an address the chain has just produced is a group.
@@ -283,6 +307,7 @@ export async function registerGroup(contractId: string, token: string): Promise<
     method: 'POST',
     token,
     body: { contractId },
+    schema: registeredGroupSchema,
   });
 }
 

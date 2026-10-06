@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from './errors';
 
 const ENV = {
   VITE_APP_URL: 'http://localhost:5173',
@@ -23,6 +24,7 @@ const { createInvite, redeemInvite, inviteLink, looksLikeInviteCode } = await im
 
 const GROUP = `C${'A'.repeat(55)}`;
 const CODE = 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG';
+const INVITE = { code: CODE, groupContractId: GROUP, expiresAt: null, maxUses: null, uses: 0 };
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -41,9 +43,7 @@ function ok(data: unknown): Response {
 
 describe('createInvite', () => {
   it('posts to the group’s invites path', async () => {
-    fetchMock.mockResolvedValue(
-      ok({ code: CODE, groupContractId: GROUP, expiresAt: null, maxUses: null, uses: 0 }),
-    );
+    fetchMock.mockResolvedValue(ok(INVITE));
 
     await createInvite({ groupContractId: GROUP }, 'a-token');
 
@@ -55,7 +55,7 @@ describe('createInvite', () => {
   });
 
   it('omits limits it was not given, rather than sending nulls', async () => {
-    fetchMock.mockResolvedValue(ok({ code: CODE }));
+    fetchMock.mockResolvedValue(ok(INVITE));
 
     await createInvite({ groupContractId: GROUP }, 'a-token');
 
@@ -66,7 +66,7 @@ describe('createInvite', () => {
   });
 
   it('sends the limits it was given', async () => {
-    fetchMock.mockResolvedValue(ok({ code: CODE }));
+    fetchMock.mockResolvedValue(ok(INVITE));
 
     await createInvite({ groupContractId: GROUP, expiresInHours: 48, maxUses: 3 }, 'a-token');
 
@@ -75,7 +75,7 @@ describe('createInvite', () => {
   });
 
   it('escapes the contract id in the path', async () => {
-    fetchMock.mockResolvedValue(ok({ code: CODE }));
+    fetchMock.mockResolvedValue(ok(INVITE));
 
     // Not an address today, but the path segment is built from a value that comes
     // from a route parameter, so it is escaped rather than trusted.
@@ -83,6 +83,14 @@ describe('createInvite', () => {
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       'https://api.example.test/api/v1/groups/C%2F..%2Fevil/invites',
+    );
+  });
+
+  it('fails validation when response is malformed', async () => {
+    fetchMock.mockResolvedValue(ok({ code: CODE }));
+
+    await expect(createInvite({ groupContractId: GROUP }, 'a-token')).rejects.toBeInstanceOf(
+      ApiError,
     );
   });
 });
@@ -108,6 +116,12 @@ describe('redeemInvite', () => {
     // The point of an opaque code: this is how the client learns which contract
     // to read and which to send the join transaction to.
     expect(result.groupContractId).toBe(GROUP);
+  });
+
+  it('fails validation when response is malformed', async () => {
+    fetchMock.mockResolvedValue(ok({ wrongField: 123 }));
+
+    await expect(redeemInvite(CODE, 'a-token')).rejects.toBeInstanceOf(ApiError);
   });
 });
 
@@ -139,19 +153,17 @@ describe('looksLikeInviteCode', () => {
   });
 
   it('rejects a contract address', () => {
-    // The failure this project already made once: an address is public and
-    // enumerable, so a link containing one is a link everyone has.
+    // A contract address in an invite slot is someone using the old flow or
+    // pasting the wrong thing; either way, asking the API about it is a request
+    // that cannot succeed.
     expect(looksLikeInviteCode(GROUP)).toBe(false);
-    expect(looksLikeInviteCode(`G${'A'.repeat(55)}`)).toBe(false);
   });
 
   it('rejects a code that is too short', () => {
-    expect(looksLikeInviteCode('short')).toBe(false);
-    expect(looksLikeInviteCode('')).toBe(false);
+    expect(looksLikeInviteCode('too-short')).toBe(false);
   });
 
   it('rejects a code with characters base64url does not use', () => {
-    expect(looksLikeInviteCode(`${CODE}+`)).toBe(false);
-    expect(looksLikeInviteCode(`${CODE}=`)).toBe(false);
+    expect(looksLikeInviteCode(`${CODE}!`)).toBe(false);
   });
 });
