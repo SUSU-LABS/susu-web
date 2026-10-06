@@ -4,6 +4,7 @@ import { useDeleteAccount, useLinkWallet, useMe, useUpdateProfile } from '@/lib/
 import { apiErrorMessage } from '@/lib/api/errors';
 import { useAuth } from '@/lib/auth/context';
 import { signOutOtherSessions, updatePassword } from '@/lib/auth/actions';
+import { resetPasswordSchema, validate } from '@/lib/auth/validation';
 import { useStellar } from '@/lib/stellar/hooks';
 import {
   avatarProblemMessage,
@@ -290,9 +291,14 @@ function PasswordSection() {
   const [done, setDone] = useState(false);
   const [problem, setProblem] = useState<string | undefined>(undefined);
 
-  const tooShort = password !== '' && password.length < 8;
-  const mismatch = confirmation !== '' && confirmation !== password;
-  const canSubmit = password.length >= 8 && confirmation === password && !pending;
+  const validation = validate(resetPasswordSchema, {
+    password,
+    confirmPassword: confirmation,
+  });
+  const passwordError = password === '' || validation.ok ? undefined : validation.errors.password;
+  const confirmationError =
+    confirmation === '' || validation.ok ? undefined : validation.errors.confirmPassword;
+  const canSubmit = validation.ok && !pending;
 
   async function onSubmit(): Promise<void> {
     setProblem(undefined);
@@ -342,7 +348,7 @@ function PasswordSection() {
           type="password"
           autoComplete="new-password"
           value={password}
-          error={tooShort ? 'Use at least 8 characters.' : undefined}
+          error={passwordError}
           onChange={(event) => setPassword(event.target.value)}
         />
         <Field
@@ -350,7 +356,7 @@ function PasswordSection() {
           type="password"
           autoComplete="new-password"
           value={confirmation}
-          error={mismatch ? 'The two passwords do not match.' : undefined}
+          error={confirmationError}
           onChange={(event) => setConfirmation(event.target.value)}
         />
         <Button type="submit" pending={pending} disabled={!canSubmit}>
