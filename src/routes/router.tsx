@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { createBrowserRouter, RouterProvider } from 'react-router';
 import { AppLayout } from './AppLayout';
 import { RequireAuth } from './RequireAuth';
@@ -7,15 +8,34 @@ import { Login } from '@/pages/auth/Login';
 import { Signup } from '@/pages/auth/Signup';
 import { ForgotPassword } from '@/pages/auth/ForgotPassword';
 import { ResetPassword } from '@/pages/auth/ResetPassword';
-import { JoinInvite } from '@/pages/JoinInvite';
-import { Dashboard } from '@/pages/app/Dashboard';
-import { Groups } from '@/pages/app/Groups';
-import { CreateGroup } from '@/pages/app/CreateGroup';
-import { GroupDetail } from '@/pages/app/GroupDetail';
-import { Activity } from '@/pages/app/Activity';
-import { Settings } from '@/pages/app/Settings';
-import { TransactionDetail } from '@/pages/app/TransactionDetail';
-import { NotFound } from '@/pages/NotFound';
+
+const JoinInvite = lazy(() =>
+  import('@/pages/JoinInvite').then(({ JoinInvite }) => ({ default: JoinInvite })),
+);
+const Dashboard = lazy(() =>
+  import('@/pages/app/Dashboard').then(({ Dashboard }) => ({ default: Dashboard })),
+);
+const Groups = lazy(() => import('@/pages/app/Groups').then(({ Groups }) => ({ default: Groups })));
+const CreateGroup = lazy(() =>
+  import('@/pages/app/CreateGroup').then(({ CreateGroup }) => ({ default: CreateGroup })),
+);
+const GroupDetail = lazy(() =>
+  import('@/pages/app/GroupDetail').then(({ GroupDetail }) => ({ default: GroupDetail })),
+);
+const Activity = lazy(() =>
+  import('@/pages/app/Activity').then(({ Activity }) => ({ default: Activity })),
+);
+const Settings = lazy(() =>
+  import('@/pages/app/Settings').then(({ Settings }) => ({ default: Settings })),
+);
+const TransactionDetail = lazy(() =>
+  import('@/pages/app/TransactionDetail').then(({ TransactionDetail }) => ({
+    default: TransactionDetail,
+  })),
+);
+const NotFound = lazy(() =>
+  import('@/pages/NotFound').then(({ NotFound }) => ({ default: NotFound })),
+);
 
 /**
  * Every route carries an `errorElement` so a render failure costs the page it
@@ -52,5 +72,15 @@ const router = createBrowserRouter([
 ]);
 
 export function Router() {
-  return <RouterProvider router={router} />;
+  return (
+    <Suspense
+      fallback={
+        <div role="status" className="mx-auto max-w-3xl px-6 py-10 text-sm text-neutral-500">
+          Loading page…
+        </div>
+      }
+    >
+      <RouterProvider router={router} />
+    </Suspense>
+  );
 }

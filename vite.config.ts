@@ -16,6 +16,16 @@ export default defineConfig({
   build: {
     // Never ship source maps containing secrets to a public deployment.
     sourcemap: false,
+    manifest: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('/node_modules/@stellar/')) return 'stellar';
+          if (id.includes('/node_modules/framer-motion/')) return 'motion';
+          return undefined;
+        },
+      },
+    },
   },
   test: {
     environment: 'node',
