@@ -40,6 +40,45 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  /**
+   * Applies a newly observed authorized account to the session.
+   *
+   * Only the settled states move: a re-probe that lands while the user is
+   * mid-connect must not rewrite the `connecting` state out from under the
+   * prompt flow. An unchanged address is a no-op so background re-probes do
+   * not churn renders.
+   */
+  const applyAccount = useCallback((next: WalletAccount | null): void => {
+    setAccount((previous) =>
+      previous?.address === next?.address ? previous : (next ?? undefined),
+    );
+    setStatus((previous) =>
+      previous === 'connected' || previous === 'disconnected'
+        ? next === null
+          ? 'disconnected'
+          : 'connected'
+        : previous,
+    );
+  }, []);
+
+  /**
+   * Re-reads the already-authorized account without prompting.
+   *
+   * The account Freighter has active can change at any time — a different tab,
+   * the extension popup — so the address read on mount goes stale. A failed
+   * probe is left alone: it is a transient fault, not a session change.
+   */
+  const syncAccount = useCallback(async (): Promise<void> => {
+    const target = wallet;
+    if (target === undefined) return;
+    try {
+      const current = await target.getConnectedAccount();
+      if (isMounted.current) applyAccount(current);
+    } catch {
+      // Leave the session as it is.
+    }
+  }, [wallet, applyAccount]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -82,6 +121,35 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, []);
+
+  // The wallet UI lives outside this tab, so a switch made there only becomes
+  // visible here when the tab regains attention. Re-probing on focus and on
+  // visibility change keeps `address` from going stale without polling.
+  useEffect(() => {
+    const onFocus = (): void => {
+      void syncAccount();
+    };
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState === 'visible') void syncAccount();
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [syncAccount]);
+
+  // Where the adapter can push account changes (Freighter's poll-based
+  // watcher), apply them as they arrive instead of waiting for the next
+  // focus. Re-subscribes when the session moves to a different wallet.
+  useEffect(() => {
+    if (wallet?.onAccountChanged === undefined) return;
+    const unsubscribe = wallet.onAccountChanged((changed) => {
+      if (isMounted.current) applyAccount(changed);
+    });
+    return unsubscribe;
+  }, [wallet, applyAccount]);
 
   const connect = useCallback(async (): Promise<WalletAccount | undefined> => {
     const target = wallet ?? (await listAvailableWallets())[0];
