@@ -16,6 +16,18 @@ export default defineConfig({
   build: {
     // Never ship source maps containing secrets to a public deployment.
     sourcemap: false,
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('@stellar/stellar-sdk')) return 'vendor-stellar';
+            if (id.includes('framer-motion') || id.includes('motion-dom')) return 'vendor-motion';
+            if (id.includes('react-router')) return 'vendor-router';
+          }
+        },
+      },
+    },
   },
   test: {
     environment: 'node',
