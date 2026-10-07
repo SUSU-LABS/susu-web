@@ -105,3 +105,15 @@ jobs:
             exit 0
           fi
           pnpm check:bundle
+
+      # Guards the route-level code splitting from #24: fails if the Stellar
+      # SDK becomes reachable from the entry chunk again or the entry grows
+      # past its budget.
+      - name: Verify bundle size budget
+        run: |
+          set -euo pipefail
+          if [ ! -d dist ]; then
+            echo "dist/ not found; skipping bundle size check"
+            exit 0
+          fi
+          pnpm check:bundle-size

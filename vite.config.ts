@@ -16,6 +16,21 @@ export default defineConfig({
   build: {
     // Never ship source maps containing secrets to a public deployment.
     sourcemap: false,
+    rollupOptions: {
+      output: {
+        // Vendors that dwarf the app code get their own chunks: a change to one
+        // no longer invalidates the cache of the other, and the public routes
+        // never pay for the Stellar SDK they never touch — see #24.
+        manualChunks(id) {
+          if (id.includes('@stellar/stellar-sdk')) return 'vendor-stellar';
+          if (id.includes('framer-motion')) return 'vendor-motion';
+          // Everything else from node_modules — React, the router, the query
+          // client, Supabase, zod — ships as one cacheable vendor chunk, so
+          // the entry stays app code only.
+          if (id.includes('node_modules')) return 'vendor';
+        },
+      },
+    },
   },
   test: {
     environment: 'node',
