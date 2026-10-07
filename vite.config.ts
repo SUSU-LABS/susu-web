@@ -34,11 +34,34 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    // Global test setup (e.g. the React `act` environment flag). The file was
+    // already listed in `tsconfig.json`; this is what actually runs it.
+    setupFiles: ['./vitest.setup.ts'],
     // `scripts/` holds the build-time security checks, which are plain ESM rather
     // than TypeScript so they can run without a build step. Their logic is worth
     // testing for the same reason any guard is: a check that cannot fail on the
     // thing it exists for is not protecting anything.
     include: ['src/**/*.{test,spec}.{ts,tsx}', 'scripts/**/*.{test,spec}.mjs'],
     reporters: ['default'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text'],
+      // Only the code this repository owns is measured. Vitest counts files a
+      // test actually loads, so the floor below tracks the modules under test
+      // rather than being diluted by screens that have no unit tests yet — the
+      // gate exists to stop the covered code regressing, and adding tests for a
+      // screen is how that screen joins it.
+      exclude: ['src/**/*.{test,spec}.{ts,tsx}', 'scripts/**/*.{test,spec}.mjs', 'src/main.tsx'],
+      // A floor, not a target. It is set just below what the suite reaches so a
+      // change that removes coverage fails CI, without making unrelated edits
+      // fail on a one-line dip. Raising it is a deliberate act; lowering it is a
+      // decision that should be justified in review.
+      thresholds: {
+        statements: 78,
+        branches: 70,
+        functions: 73,
+        lines: 79,
+      },
+    },
   },
 });

@@ -75,8 +75,11 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Test
-        run: pnpm test
+      # Runs the suite with coverage so the thresholds in `vite.config.ts` are
+      # enforced here: a change that drops coverage below the floor fails CI
+      # rather than being noticed later, if at all.
+      - name: Test with coverage
+        run: pnpm test:coverage
 
       - name: Build
         run: pnpm build
