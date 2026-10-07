@@ -5,9 +5,11 @@ import {
   requestAccess,
   signMessage as freighterSignMessage,
   signTransaction as freighterSignTransaction,
+  WatchWalletChanges,
 } from '@stellar/freighter-api';
 import { WalletError, type WalletErrorCode } from './errors';
 import type {
+  AccountChangeCallback,
   SignedMessage,
   SignedTransaction,
   SignMessageOptions,
@@ -166,6 +168,22 @@ export const freighterWallet: WalletAdapter = {
     }
 
     return response.address === '' ? null : { address: response.address };
+  },
+
+  /**
+   * Freighter has no push channel for account changes; `WatchWalletChanges`
+   * polls the extension and reports a new address/network when it appears.
+   * Poll errors are swallowed here rather than reported as disconnects: a
+   * transient failure to reach the extension is not a session change, and the
+   * provider's focus re-probe picks up a real disconnect anyway.
+   */
+  onAccountChanged(callback: AccountChangeCallback): () => void {
+    const watcher = new WatchWalletChanges();
+    watcher.watch(({ address, error }) => {
+      if (error !== undefined) return;
+      callback(address === '' ? null : { address });
+    });
+    return () => watcher.stop();
   },
 
   async signTransaction(xdr: string, options: SignTransactionOptions): Promise<SignedTransaction> {
