@@ -20,6 +20,14 @@ export interface WalletAccount {
   readonly address: string;
 }
 
+/**
+ * Fired when the wallet reports a different authorized account, or none.
+ *
+ * `null` means the site is no longer authorized (or the extension can no longer
+ * be reached); the provider treats that as a disconnect, never as an error.
+ */
+export type AccountChangeCallback = (account: WalletAccount | null) => void;
+
 export interface SignTransactionOptions {
   /** The passphrase of the network the transaction was built for. */
   readonly networkPassphrase: string;
@@ -67,6 +75,13 @@ export interface WalletAdapter {
    * prompts, so it is safe to call during initialization.
    */
   getConnectedAccount(): Promise<WalletAccount | null>;
+
+  /**
+   * Subscribes to account changes reported by the wallet, returning an
+   * unsubscribe function. Optional: wallets that cannot push changes omit it,
+   * and the provider falls back to re-probing on window focus/visibility.
+   */
+  onAccountChanged?(callback: AccountChangeCallback): () => void;
 
   /**
    * Asks the wallet to sign an envelope. Returns the signed XDR; it does not
