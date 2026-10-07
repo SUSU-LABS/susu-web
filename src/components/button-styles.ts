@@ -35,5 +35,5 @@ export function buttonClasses(variant: ButtonVariant = 'primary'): string {
   // 44px is the smallest comfortable tap, and the natural height of this button
   // — 36px — is below it. Above `sm` a pointer is doing the aiming and the
   // tighter height is better, so the minimum drops back to the natural size.
-  return `inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed sm:min-h-9 ${BUTTON_STYLES[variant]}`;
+  return `inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-2 disabled:cursor-not-allowed dark:focus-visible:ring-neutral-100 dark:focus-visible:ring-offset-neutral-950 sm:min-h-9 ${BUTTON_STYLES[variant]}`;
 }
