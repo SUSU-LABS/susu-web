@@ -41,6 +41,40 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (wallet === undefined) return;
+
+    let cancelled = false;
+    let refreshRequest = 0;
+    const refreshAccount = async (): Promise<void> => {
+      const request = ++refreshRequest;
+      try {
+        const current = await wallet.getConnectedAccount();
+        if (cancelled || request !== refreshRequest || !isMounted.current) return;
+        setAccount(current ?? undefined);
+        setStatus(current === null ? 'disconnected' : 'connected');
+        setError(undefined);
+      } catch (cause) {
+        if (cancelled || request !== refreshRequest || !isMounted.current) return;
+        setError(toWalletError(cause));
+      }
+    };
+
+    const onFocus = (): void => void refreshAccount();
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState === 'visible') void refreshAccount();
+    };
+
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      cancelled = true;
+      refreshRequest += 1;
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [wallet]);
+
+  useEffect(() => {
     let cancelled = false;
 
     const detect = async (): Promise<void> => {

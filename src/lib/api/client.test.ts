@@ -278,7 +278,9 @@ describe('runtime schema validation', () => {
   });
 
   it('throws ApiError when apiRequest payload violates schema', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(200, { data: { id: 'test-1', count: 'not-a-number' } }));
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, { data: { id: 'test-1', count: 'not-a-number' } }),
+    );
 
     await expect(apiRequest('test', { schema: itemSchema })).rejects.toBeInstanceOf(ApiError);
   });
