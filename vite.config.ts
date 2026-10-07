@@ -2,9 +2,10 @@ import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath } from 'node:url';
+import { cspMetaPlugin } from './scripts/vite-plugin-csp.mjs';
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), cspMetaPlugin()],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
