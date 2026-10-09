@@ -54,6 +54,7 @@ describe('error tables', () => {
       17: 'GroupCompleted',
       18: 'ArithmeticOverflow',
       19: 'SplitInvariantViolated',
+      20: 'InvalidTreasury',
     });
   });
 
@@ -66,15 +67,43 @@ describe('error tables', () => {
       5: 'Paused',
       6: 'GroupNotFound',
       7: 'ArithmeticOverflow',
+      8: 'InvalidTreasury',
     });
   });
 
   it('covers every code from 1 to the declared maximum with no gaps', () => {
-    for (let code = 1; code <= 19; code += 1) {
+    for (let code = 1; code <= 20; code += 1) {
       expect(GROUP_ERRORS[code], `group code ${code}`).toBeDefined();
     }
-    for (let code = 1; code <= 7; code += 1) {
+    for (let code = 1; code <= 8; code += 1) {
       expect(FACTORY_ERRORS[code], `factory code ${code}`).toBeDefined();
+    }
+  });
+
+  it('decodes InvalidTreasury for both Group (code 20) and Factory (code 8)', () => {
+    const groupFailure = asContractError(describeFailure(hostError(20), 'group'));
+    expect(groupFailure.code).toBe(20);
+    expect(groupFailure.name).toBe('InvalidTreasury');
+    expect(groupFailure.message).toContain('treasury');
+
+    const factoryFailure = asContractError(describeFailure(hostError(8), 'factory'));
+    expect(factoryFailure.code).toBe(8);
+    expect(factoryFailure.name).toBe('InvalidTreasury');
+    expect(factoryFailure.message).toContain('treasury');
+  });
+
+  it('maps every contract error code to a non-empty name and descriptive message', () => {
+    for (const [code, name] of Object.entries(GROUP_ERRORS)) {
+      const failure = asContractError(describeFailure(hostError(Number(code)), 'group'));
+      expect(failure.name).toBe(name);
+      expect(failure.message).toBeTruthy();
+      expect(failure.message).not.toContain('Unknown error');
+    }
+    for (const [code, name] of Object.entries(FACTORY_ERRORS)) {
+      const failure = asContractError(describeFailure(hostError(Number(code)), 'factory'));
+      expect(failure.name).toBe(name);
+      expect(failure.message).toBeTruthy();
+      expect(failure.message).not.toContain('Unknown error');
     }
   });
 });
