@@ -31,6 +31,20 @@ export const envSchema = z.object({
   VITE_SUPABASE_ANON_KEY: z.string().min(1),
   VITE_STELLAR_NETWORK: stellarNetworkSchema,
   VITE_STELLAR_RPC_URL: z.string().url(),
+  /**
+   * Explicit opt-in when using a custom or non-canonical RPC endpoint whose host
+   * does not identify the configured Stellar network.
+   */
+  VITE_STELLAR_RPC_IS_CUSTOM: z
+    .preprocess((val) => {
+      if (typeof val === 'string') {
+        const trimmed = val.trim().toLowerCase();
+        if (trimmed === '' || trimmed === 'false' || trimmed === '0') return false;
+        if (trimmed === 'true' || trimmed === '1') return true;
+      }
+      return val;
+    }, z.boolean().optional())
+    .optional(),
   VITE_FACTORY_CONTRACT_ID: contractIdSchema,
   VITE_USDC_CONTRACT_ID: contractIdSchema,
   VITE_EXPLORER_BASE_URL: z.string().url(),
