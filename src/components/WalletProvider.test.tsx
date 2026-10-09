@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getConnectedAccount: vi.fn(),
+  connect: vi.fn(),
 }));
 
 vi.mock('@/lib/wallet', async (importOriginal) => {
@@ -18,7 +19,7 @@ vi.mock('@/lib/wallet', async (importOriginal) => {
         id: 'freighter',
         name: 'Freighter',
         isAvailable: vi.fn(async () => true),
-        connect: vi.fn(),
+        connect: mocks.connect,
         getConnectedAccount: mocks.getConnectedAccount,
         signTransaction: vi.fn(),
         signMessage: vi.fn(),
@@ -92,5 +93,91 @@ describe('WalletProvider account refresh', () => {
 
     expect(container.querySelector('output')?.textContent).toBe('none');
     expect(container.querySelector('output')?.dataset.status).toBe('disconnected');
+  });
+
+  function ConnectTester() {
+    const { connect, status, address } = useWallet();
+    return (
+      <div>
+        <output data-status={status}>{address ?? 'none'}</output>
+        <button id="connect-button" onClick={() => void connect()}>
+          Connect
+        </button>
+      </div>
+    );
+  }
+
+  it('guards against concurrent connect() calls and reuses the in-flight promise with deferred prompt', async () => {
+    mocks.getConnectedAccount.mockResolvedValue(null);
+    let resolveAccess!: (acc: { address: string }) => void;
+    mocks.connect.mockImplementation(
+      () =>
+        new Promise<{ address: string }>((resolve) => {
+          resolveAccess = resolve;
+        }),
+    );
+
+    await act(async () => {
+      root.render(
+        <WalletProvider>
+          <ConnectTester />
+        </WalletProvider>,
+      );
+    });
+
+    const button = container.querySelector<HTMLButtonElement>('#connect-button')!;
+    expect(container.querySelector('output')?.dataset.status).toBe('disconnected');
+
+    // Trigger two rapid clicks while the prompt is in flight
+    act(() => {
+      button.click();
+      button.click();
+    });
+
+    // Exactly one prompt/target.connect() should have been called
+    expect(mocks.connect).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('output')?.dataset.status).toBe('connecting');
+
+    // Resolve deferred prompt
+    await act(async () => {
+      resolveAccess({ address: 'GDEFERRED' });
+    });
+
+    // Successfully transitions to connected with expected address
+    expect(container.querySelector('output')?.textContent).toBe('GDEFERRED');
+    expect(container.querySelector('output')?.dataset.status).toBe('connected');
+    expect(mocks.connect).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows subsequent connect() after earlier in-flight connection settles or fails', async () => {
+    mocks.getConnectedAccount.mockResolvedValue(null);
+    mocks.connect.mockRejectedValueOnce(new Error('User rejected'));
+
+    await act(async () => {
+      root.render(
+        <WalletProvider>
+          <ConnectTester />
+        </WalletProvider>,
+      );
+    });
+
+    const button = container.querySelector<HTMLButtonElement>('#connect-button')!;
+
+    await act(async () => {
+      button.click();
+    });
+
+    expect(mocks.connect).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('output')?.dataset.status).toBe('disconnected');
+
+    // Subsequent connect succeeds
+    mocks.connect.mockResolvedValueOnce({ address: 'GSUCCESS' });
+    await act(async () => {
+      button.click();
+    });
+
+    expect(mocks.connect).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('output')?.textContent).toBe('GSUCCESS');
+    expect(container.querySelector('output')?.dataset.status).toBe('connected');
   });
 });
