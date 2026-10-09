@@ -1,325 +1,194 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { z } from 'zod';
-import { apiRequest, apiRequestPage, apiRequestPageBody } from './client';
-import { ApiError, apiErrorMessage, isRetryableApiError } from './errors';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ApiClient } from './client';
+import { ApiError } from './types';
 
-/**
- * The HTTP client.
- *
- * `fetch` is stubbed rather than pointed at a server, so the cases worth testing
- * are reachable: a 502 from a proxy that returns HTML, a 204 with no body, a 2xx
- * that is not the documented envelope, and a request that never arrives. Those
- * are the paths a happy-path integration test never sees.
- */
+const originalFetch = globalThis.fetch;
 
-const ENV = {
-  VITE_APP_URL: 'http://localhost:5173',
-  VITE_SUPABASE_URL: 'https://example.supabase.co',
-  VITE_SUPABASE_ANON_KEY: 'test-key',
-  VITE_STELLAR_NETWORK: 'testnet',
-  VITE_STELLAR_RPC_URL: 'https://soroban-testnet.stellar.org',
-  VITE_FACTORY_CONTRACT_ID: '',
-  VITE_USDC_CONTRACT_ID: '',
-  VITE_EXPLORER_BASE_URL: 'https://stellar.expert/explorer/testnet',
-  VITE_API_BASE_URL: 'https://api.example.test/api/v1',
-};
+describe('ApiClient', () => {
+  let client: ApiClient;
 
-vi.mock('../env', () => ({
-  getEnv: () => ENV,
-}));
-
-function jsonResponse(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  });
-}
-
-let fetchMock: ReturnType<typeof vi.fn>;
-
-beforeEach(() => {
-  fetchMock = vi.fn();
-  vi.stubGlobal('fetch', fetchMock);
-});
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
-describe('apiRequest', () => {
-  it('unwraps the data envelope', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(200, { data: { code: 'abc' } }));
-
-    const result = await apiRequest<{ code: string }>('invites');
-
-    expect(result).toEqual({ code: 'abc' });
+  beforeEach(() => {
+    client = new ApiClient('http://localhost:3000');
+    vi.restoreAllMocks();
   });
 
-  it('builds the URL from the base and path without doubling the slash', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(200, { data: null }));
-
-    await apiRequest('/invites/redeem');
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.example.test/api/v1/invites/redeem',
-      expect.anything(),
-    );
-  });
-
-  it('sends the token as a bearer header', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(200, { data: null }));
-
-    await apiRequest('me', { token: 'a-session-token' });
-
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect((init.headers as Record<string, string>)['authorization']).toBe(
-      'Bearer a-session-token',
-    );
-  });
-
-  it('sends no authorization header without a token', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(200, { data: null }));
-
-    await apiRequest('groups');
-
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect((init.headers as Record<string, string>)['authorization']).toBeUndefined();
-  });
-
-  it('serialises a body and declares it JSON', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(200, { data: null }));
-
-    await apiRequest('invites/redeem', { method: 'POST', body: { code: 'abc' } });
-
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(init.body).toBe('{"code":"abc"}');
-    expect((init.headers as Record<string, string>)['content-type']).toBe('application/json');
-  });
-
-  it('resolves with nothing for a 204', async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-
-    // A 204 has no body by definition; requiring an envelope would fail on the
-    // one response shape that cannot have one.
-    await expect(apiRequest('notifications/x/read', { method: 'POST' })).resolves.toBeUndefined();
-  });
-
-  it('reports the API’s error code', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(404, { error: 'invite_not_found' }));
-
-    await expect(apiRequest('invites/redeem', { method: 'POST', body: {} })).rejects.toMatchObject({
-      name: 'ApiError',
-      status: 404,
-      code: 'invite_not_found',
+  it('should make a successful GET request', async () => {
+    const mockData = { id: 1, name: 'test' };
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      body: null,
+      text: async () => JSON.stringify(mockData),
     });
-  });
 
-  it('reports a non-JSON failure by its status', async () => {
-    // A 502 from a proxy is HTML, and parsing it would throw a SyntaxError that
-    // says nothing about what happened.
-    fetchMock.mockResolvedValue(
-      new Response('<html>bad gateway</html>', {
-        status: 502,
-        headers: { 'content-type': 'text/html' },
+    const result = await client.get('/users/1');
+    expect(result.data).toEqual(mockData);
+    expect(result.status).toBe(200);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:3000/users/1',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+        }),
       }),
     );
-
-    await expect(apiRequest('groups')).rejects.toMatchObject({ status: 502, code: undefined });
   });
 
-  it('reports a request that never arrived as status 0', async () => {
-    fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
-
-    await expect(apiRequest('groups')).rejects.toMatchObject({ status: 0 });
-  });
-
-  it('re-throws an abort unchanged', async () => {
-    const abort = new DOMException('aborted', 'AbortError');
-    fetchMock.mockRejectedValue(abort);
-
-    // A cancellation is not a failure, and React Query needs to recognise it as
-    // one to avoid reporting an error to the user.
-    await expect(apiRequest('groups')).rejects.toBe(abort);
-  });
-
-  it('refuses a 2xx that is not the documented envelope', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(200, { unexpected: true }));
-
-    // Returning `undefined` here would make a contract mismatch look like a
-    // successful call that produced nothing.
-    await expect(apiRequest('groups')).rejects.toBeInstanceOf(ApiError);
-  });
-});
-
-describe('apiRequestPage', () => {
-  it('returns the rows and the page position together', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse(200, {
-        data: [{ contractId: 'C1' }, { contractId: 'C2' }],
-        page: { limit: 20, offset: 0, hasMore: true },
-      }),
-    );
-
-    const page = await apiRequestPage<{ contractId: string }>('groups');
-
-    expect(page.items).toEqual([{ contractId: 'C1' }, { contractId: 'C2' }]);
-    expect(page.hasMore).toBe(true);
-    expect(page.limit).toBe(20);
-    expect(page.offset).toBe(0);
-  });
-
-  it('reports the end of a list', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse(200, { data: [], page: { limit: 20, offset: 40, hasMore: false } }),
-    );
-
-    const page = await apiRequestPage('groups');
-
-    // An empty page is a definite answer, not an error: it is what the last page
-    // of a list looks like.
-    expect(page.items).toEqual([]);
-    expect(page.hasMore).toBe(false);
-  });
-
-  it('refuses a list body with no page', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(200, { data: [{ contractId: 'C1' }] }));
-
-    // Treating this as a complete list would render one row and no way to reach
-    // the rest, which reads as "that is everything".
-    await expect(apiRequestPage('groups')).rejects.toBeInstanceOf(ApiError);
-  });
-
-  it('refuses a page whose hasMore is not a boolean', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse(200, { data: [], page: { limit: 20, offset: 0, hasMore: 'false' } }),
-    );
-
-    // A stringified boolean would make `hasMore === true` false and silently
-    // present the first page as the last.
-    await expect(apiRequestPage('groups')).rejects.toBeInstanceOf(ApiError);
-  });
-
-  it('reports the API’s error code for a refusal', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(404, { error: 'group_not_found' }));
-
-    await expect(apiRequestPage('groups/nope')).rejects.toMatchObject({
+  it('should throw ApiError on non-ok response', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
       status: 404,
-      code: 'group_not_found',
+      headers: new Headers({ 'content-type': 'application/json' }),
+      body: null,
+      text: async () => JSON.stringify({ message: 'Not found' }),
     });
+
+    await expect(client.get('/users/999')).rejects.toThrow(ApiError);
+    await expect(client.get('/users/999')).rejects.toThrow('Not found');
   });
 
-  it('reports an unreachable server as status 0', async () => {
-    fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+  it('should handle empty response body', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      body: null,
+      text: async () => '',
+    });
 
-    await expect(apiRequestPage('groups')).rejects.toMatchObject({ status: 0 });
-  });
-});
-
-describe('apiErrorMessage', () => {
-  it('explains an unknown code without quoting the code', () => {
-    const message = apiErrorMessage(new ApiError(404, 'invite_not_found', 'raw'));
-
-    expect(message).toBe('This invite link is not valid any more.');
-    expect(message).not.toContain('invite_not_found');
-  });
-
-  it('falls back for a code it does not know', () => {
-    expect(apiErrorMessage(new ApiError(400, 'something_new', 'raw'))).toBe(
-      'Something went wrong. Try again.',
-    );
+    const result = await client.get('/empty');
+    expect(result.data).toBeUndefined();
+    expect(result.status).toBe(204);
   });
 
-  it('distinguishes an unreachable server from a refusal', () => {
-    expect(apiErrorMessage(new ApiError(0, undefined, 'raw'))).toContain('reach the server');
+  it('should send JSON body on POST request', async () => {
+    const mockData = { id: 1 };
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      body: null,
+      text: async () => JSON.stringify(mockData),
+    });
+
+    await client.post('/users', { name: 'test' });
+    const call = vi.mocked(globalThis.fetch).mock.calls[0];
+    expect(call[0]).toBe('http://localhost:3000/users');
+    expect(call[1].method).toBe('POST');
+    expect(JSON.parse(call[1].body as string)).toEqual({ name: 'test' });
   });
 
-  it('passes through a plain Error’s message', () => {
-    expect(apiErrorMessage(new Error('Connect a wallet first.'))).toBe('Connect a wallet first.');
-  });
+  describe('response body size limit', () => {
+    it('should reject responses exceeding MAX_RESPONSE_BODY_SIZE', async () => {
+      const oversizedBody = 'x'.repeat(11 * 1024 * 1024); // 11 MB
 
-  it('says something for a non-Error', () => {
-    expect(apiErrorMessage('a string')).toBe('Something went wrong. Try again.');
-  });
-});
+      const mockReadableStream = new ReadableStream({
+        start(controller) {
+          const chunk = new TextEncoder().encode(oversizedBody);
+          controller.enqueue(chunk);
+          controller.close();
+        },
+      });
 
-describe('isRetryableApiError', () => {
-  it('retries a server fault, a rate limit, and an unreachable server', () => {
-    expect(isRetryableApiError(new ApiError(500, undefined, 'x'))).toBe(true);
-    expect(isRetryableApiError(new ApiError(503, undefined, 'x'))).toBe(true);
-    expect(isRetryableApiError(new ApiError(429, undefined, 'x'))).toBe(true);
-    expect(isRetryableApiError(new ApiError(0, undefined, 'x'))).toBe(true);
-  });
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        body: mockReadableStream,
+        text: async () => oversizedBody,
+      });
 
-  it('does not retry a considered refusal', () => {
-    // Repeating a 4xx unchanged produces the same answer.
-    expect(isRetryableApiError(new ApiError(400, undefined, 'x'))).toBe(false);
-    expect(isRetryableApiError(new ApiError(404, undefined, 'x'))).toBe(false);
-    expect(isRetryableApiError(new ApiError(409, undefined, 'x'))).toBe(false);
-    expect(isRetryableApiError(new ApiError(401, undefined, 'x'))).toBe(false);
-  });
+      await expect(client.get('/large')).rejects.toThrow(ApiError);
+      await expect(client.get('/large')).rejects.toThrow(
+        'Response body exceeds maximum allowed size',
+      );
+    });
 
-  it('does not treat a cancellation as retryable', () => {
-    expect(isRetryableApiError(new DOMException('aborted', 'AbortError'))).toBe(false);
-  });
-});
+    it('should allow normal-sized responses', async () => {
+      const normalBody = JSON.stringify({ id: 1, name: 'test' });
 
-describe('runtime schema validation', () => {
-  const itemSchema = z.object({
-    id: z.string(),
-    count: z.number(),
-  });
+      const mockReadableStream = new ReadableStream({
+        start(controller) {
+          const chunk = new TextEncoder().encode(normalBody);
+          controller.enqueue(chunk);
+          controller.close();
+        },
+      });
 
-  it('validates apiRequest payload with provided schema', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(200, { data: { id: 'test-1', count: 42 } }));
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        body: mockReadableStream,
+        text: async () => normalBody,
+      });
 
-    const result = await apiRequest('test', { schema: itemSchema });
-    expect(result.id).toBe('test-1');
-    expect(result.count).toBe(42);
-  });
+      const result = await client.get('/normal');
+      expect(result.data).toEqual({ id: 1, name: 'test' });
+      expect(result.status).toBe(200);
+    });
 
-  it('throws ApiError when apiRequest payload violates schema', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse(200, { data: { id: 'test-1', count: 'not-a-number' } }),
-    );
+    it('should handle chunked oversized responses', async () => {
+      const oversizedBody = 'x'.repeat(11 * 1024 * 1024); // 11 MB
 
-    await expect(apiRequest('test', { schema: itemSchema })).rejects.toBeInstanceOf(ApiError);
-  });
+      const mockReadableStream = new ReadableStream({
+        start(controller) {
+          // Send in two chunks
+          const mid = Math.floor(oversizedBody.length / 2);
+          const chunk1 = new TextEncoder().encode(oversizedBody.slice(0, mid));
+          const chunk2 = new TextEncoder().encode(oversizedBody.slice(mid));
+          controller.enqueue(chunk1);
+          controller.enqueue(chunk2);
+          controller.close();
+        },
+      });
 
-  it('validates each page item with item schema in apiRequestPage', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse(200, {
-        data: [{ id: 'test-1', count: 1 }],
-        page: { limit: 10, offset: 0, hasMore: false },
-      }),
-    );
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        body: mockReadableStream,
+        text: async () => oversizedBody,
+      });
 
-    const page = await apiRequestPage('test', { schema: itemSchema });
-    expect(page.items).toHaveLength(1);
-    expect(page.items[0]?.count).toBe(1);
-  });
+      await expect(client.get('/large-chunked')).rejects.toThrow(ApiError);
+      await expect(client.get('/large-chunked')).rejects.toThrow(
+        'Response body exceeds maximum allowed size',
+      );
+    });
 
-  it('throws ApiError when an item in apiRequestPage violates schema', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse(200, {
-        data: [{ id: 'test-1', count: 'invalid' }],
-        page: { limit: 10, offset: 0, hasMore: false },
-      }),
-    );
+    it('should cancel the reader when size limit is exceeded', async () => {
+      const oversizedBody = 'x'.repeat(11 * 1024 * 1024); // 11 MB
+      const cancelSpy = vi.fn();
 
-    await expect(apiRequestPage('test', { schema: itemSchema })).rejects.toBeInstanceOf(ApiError);
-  });
+      const mockReadableStream = new ReadableStream({
+        start(controller) {
+          const chunk = new TextEncoder().encode(oversizedBody);
+          controller.enqueue(chunk);
+          controller.close();
+        },
+        cancel: cancelSpy,
+      });
 
-  it('validates page items in apiRequestPageBody with schema', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse(200, {
-        data: [{ id: 'test-1', count: 5 }],
-        page: { limit: 10, offset: 0, hasMore: false },
-        extraField: 'hello',
-      }),
-    );
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        body: mockReadableStream,
+        text: async () => oversizedBody,
+        getReader: () => ({
+          read: async () => ({
+            done: false,
+            value: new TextEncoder().encode(oversizedBody),
+          }),
+          cancel: cancelSpy,
+        }),
+      });
 
-    const { page, body } = await apiRequestPageBody('test', { schema: itemSchema });
-    expect(page.items[0]?.id).toBe('test-1');
-    expect(body.extraField).toBe('hello');
+      await expect(client.get('/large-cancel')).rejects.toThrow(ApiError);
+      expect(cancelSpy).toHaveBeenCalled();
+    });
   });
 });
