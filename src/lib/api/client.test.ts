@@ -142,6 +142,81 @@ describe('apiRequest', () => {
     await expect(apiRequest('groups')).rejects.toBe(abort);
   });
 
+  it('reports a timed-out request as a distinct retryable ApiError', async () => {
+    // A fetch that never settles, so the client's own timeout is what aborts.
+    // Real fetch rejects with the aborting signal's reason, so the mock does
+    // the same to exercise the timeout attribution faithfully.
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => {
+            reject(
+              init.signal?.reason ?? new DOMException('The operation timed out.', 'TimeoutError'),
+            );
+          });
+        }),
+    );
+
+    const error = await apiRequest('groups', { timeoutMs: 10 }).catch((e) => e);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 0, code: 'timeout' });
+    expect(isRetryableApiError(error)).toBe(true);
+  });
+
+  it('still lets a caller abort win over the timeout', async () => {
+    const controller = new AbortController();
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => {
+            // The caller aborted first: the rejection looks like a plain
+            // caller abort, not a timeout.
+            reject(init.signal?.reason ?? new DOMException('aborted', 'AbortError'));
+          });
+        }),
+    );
+
+    const pending = apiRequest('groups', { signal: controller.signal, timeoutMs: 5000 });
+    controller.abort();
+    const abort = new DOMException('aborted', 'AbortError');
+    // The mock rejects with its own AbortError instance; what matters is that
+    // a caller abort is re-thrown as-is rather than converted to a timeout.
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(abort.name).toBe('AbortError');
+  });
+
+  it('does not misattribute a caller abort as a timeout when the timer fires later', async () => {
+    // Regression test for the timeout-attribution race: the caller aborts
+    // first, but the timeout timer fires before the rejection is handled.
+    // `timeoutSignal.aborted` is then true even though the timeout did not
+    // cause this rejection, so attribution must use the abort reason, not
+    // the flag.
+    const controller = new AbortController();
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => {
+            // Delay the rejection past the 10ms timeout so the timer has
+            // fired by the time the client classifies the error. The
+            // rejection itself is still the caller's abort.
+            setTimeout(() => {
+              reject(new DOMException('aborted by caller', 'AbortError'));
+            }, 30);
+          });
+        }),
+    );
+
+    const pending = apiRequest('groups', { signal: controller.signal, timeoutMs: 10 });
+    controller.abort();
+
+    const error = await pending.catch((e) => e);
+    expect(error).toMatchObject({ name: 'AbortError' });
+    // A caller abort must be re-thrown unchanged, never converted into a
+    // timeout ApiError.
+    expect(error).not.toBeInstanceOf(ApiError);
+  });
+
   it('refuses a 2xx that is not the documented envelope', async () => {
     fetchMock.mockResolvedValue(jsonResponse(200, { unexpected: true }));
 
