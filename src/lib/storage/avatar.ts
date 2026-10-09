@@ -165,7 +165,8 @@ export function avatarObjectKey(userId: string, kind: ImageKind, name: string): 
  * rather than as a broken profile.
  */
 export function isAvatarPathFor(path: string, userId: string): boolean {
-  return new RegExp(`^users/${userId}/avatar/[0-9a-f]{32}\\.(png|jpe?g|webp)$`).test(path);
+  const escapedUserId = userId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^users/${escapedUserId}/avatar/[0-9a-f]{32}\\.(png|jpe?g|webp)$`).test(path);
 }
 
 /** The kind an object path names, from its extension. */
