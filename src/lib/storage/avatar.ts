@@ -157,6 +157,16 @@ export function avatarObjectKey(userId: string, kind: ImageKind, name: string): 
 }
 
 /**
+ * Escapes regex metacharacters so a value can be interpolated into a pattern
+ * and match literally. The user id is an opaque string today (a UUID), but
+ * nothing in the type enforces that shape, so it must not be allowed to change
+ * what the pattern matches.
+ */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
  * Whether a stored path is one this user's photo could legitimately occupy.
  *
  * The same expression as `profiles_avatar_path_shape` in the migration. It exists
@@ -165,7 +175,9 @@ export function avatarObjectKey(userId: string, kind: ImageKind, name: string): 
  * rather than as a broken profile.
  */
 export function isAvatarPathFor(path: string, userId: string): boolean {
-  return new RegExp(`^users/${userId}/avatar/[0-9a-f]{32}\\.(png|jpe?g|webp)$`).test(path);
+  return new RegExp(`^users/${escapeRegExp(userId)}/avatar/[0-9a-f]{32}\\.(png|jpe?g|webp)$`).test(
+    path,
+  );
 }
 
 /** The kind an object path names, from its extension. */
