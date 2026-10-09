@@ -36,7 +36,8 @@ export type GroupErrorName =
   | 'WrongRoundPhase'
   | 'GroupCompleted'
   | 'ArithmeticOverflow'
-  | 'SplitInvariantViolated';
+  | 'SplitInvariantViolated'
+  | 'InvalidTreasury';
 
 /** Every `FactoryError` variant name, matching the contract's declaration order. */
 export type FactoryErrorName =
@@ -46,7 +47,8 @@ export type FactoryErrorName =
   | 'InvalidFrequency'
   | 'Paused'
   | 'GroupNotFound'
-  | 'ArithmeticOverflow';
+  | 'ArithmeticOverflow'
+  | 'InvalidTreasury';
 
 /**
  * `GroupError` discriminator values, as returned on-chain.
@@ -74,6 +76,7 @@ export const GROUP_ERRORS: Readonly<Record<number, GroupErrorName>> = {
   17: 'GroupCompleted',
   18: 'ArithmeticOverflow',
   19: 'SplitInvariantViolated',
+  20: 'InvalidTreasury',
 };
 
 /** `FactoryError` discriminator values, as returned on-chain. */
@@ -85,6 +88,7 @@ export const FACTORY_ERRORS: Readonly<Record<number, FactoryErrorName>> = {
   5: 'Paused',
   6: 'GroupNotFound',
   7: 'ArithmeticOverflow',
+  8: 'InvalidTreasury',
 };
 
 /**
@@ -117,6 +121,7 @@ const GROUP_MESSAGES: Record<GroupErrorName, string> = {
   ArithmeticOverflow: 'The amounts involved are too large to be processed safely.',
   SplitInvariantViolated:
     'The payout could not be split correctly, so it was refused rather than paid out incorrectly.',
+  InvalidTreasury: "This group's treasury address is not valid.",
 };
 
 const FACTORY_MESSAGES: Record<FactoryErrorName, string> = {
@@ -127,6 +132,7 @@ const FACTORY_MESSAGES: Record<FactoryErrorName, string> = {
   Paused: 'New group creation is paused. Existing groups are unaffected.',
   GroupNotFound: 'That group does not exist.',
   ArithmeticOverflow: 'The amounts involved are too large to be processed safely.',
+  InvalidTreasury: "This group's treasury address is not valid.",
 };
 
 /** Which contract produced an error, and therefore which table to decode against. */
