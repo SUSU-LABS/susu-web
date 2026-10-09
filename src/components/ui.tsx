@@ -1,6 +1,7 @@
 import {
   useEffect,
   useRef,
+  useId,
   useState,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
@@ -126,7 +127,8 @@ export function Field({
   'aria-describedby': describedBy,
   ...rest
 }: FieldProps) {
-  const fieldId = id ?? rest.name ?? label.toLowerCase().replace(/\s+/g, '-');
+  const generatedId = useId();
+  const fieldId = id ?? rest.name ?? generatedId;
   const descriptionIds = [
     describedBy,
     hint === undefined ? undefined : `${fieldId}-hint`,
@@ -173,7 +175,8 @@ export function SelectField({
   className = '',
   ...rest
 }: SelectFieldProps) {
-  const fieldId = id ?? rest.name ?? label.toLowerCase().replace(/\s+/g, '-');
+  const generatedId = useId();
+  const fieldId = id ?? rest.name ?? generatedId;
   return (
     <div className={className}>
       <label htmlFor={fieldId} className="block text-sm font-medium">
