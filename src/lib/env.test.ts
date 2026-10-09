@@ -84,4 +84,23 @@ describe('parseEnv', () => {
       expect(String(error)).not.toContain('super-secret-value');
     }
   });
+
+  it('parses VITE_STELLAR_RPC_IS_CUSTOM flags', () => {
+    expect(
+      parseEnv(validEnv({ VITE_STELLAR_RPC_IS_CUSTOM: 'true' })).VITE_STELLAR_RPC_IS_CUSTOM,
+    ).toBe(true);
+    expect(parseEnv(validEnv({ VITE_STELLAR_RPC_IS_CUSTOM: '1' })).VITE_STELLAR_RPC_IS_CUSTOM).toBe(
+      true,
+    );
+    expect(
+      parseEnv(validEnv({ VITE_STELLAR_RPC_IS_CUSTOM: true })).VITE_STELLAR_RPC_IS_CUSTOM,
+    ).toBe(true);
+    expect(
+      parseEnv(validEnv({ VITE_STELLAR_RPC_IS_CUSTOM: 'false' })).VITE_STELLAR_RPC_IS_CUSTOM,
+    ).toBe(false);
+    expect(
+      parseEnv(validEnv({ VITE_STELLAR_RPC_IS_CUSTOM: false })).VITE_STELLAR_RPC_IS_CUSTOM,
+    ).toBe(false);
+    expect(parseEnv(validEnv()).VITE_STELLAR_RPC_IS_CUSTOM).toBeUndefined();
+  });
 });
