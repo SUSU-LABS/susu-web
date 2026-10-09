@@ -25,25 +25,64 @@ export const FORBIDDEN_ENV_KEYS = [
   'SERVICE_ROLE_KEY',
 ] as const;
 
-export const envSchema = z.object({
-  VITE_APP_URL: z.string().url(),
-  VITE_SUPABASE_URL: z.string().url(),
-  VITE_SUPABASE_ANON_KEY: z.string().min(1),
-  VITE_STELLAR_NETWORK: stellarNetworkSchema,
-  VITE_STELLAR_RPC_URL: z.string().url(),
-  VITE_FACTORY_CONTRACT_ID: contractIdSchema,
-  VITE_USDC_CONTRACT_ID: contractIdSchema,
-  VITE_EXPLORER_BASE_URL: z.string().url(),
-  /**
-   * The application API. Optional, because the app still reads group state
-   * directly from the chain and works without a backend — only invite codes and
-   * notifications need one, and those screens say so rather than failing
-   * obscurely when it is absent.
-   */
-  VITE_API_BASE_URL: z.string().url().optional(),
-});
+/**
+ * A URL field that must be `https:` once a production build is in play.
+ *
+ * The check is applied at parse time rather than left to deployment review:
+ * these values carry the Supabase anon key, signed transaction submission and
+ * the API access token, so an accidental `http://` in a production bundle
+ * downgrades the whole session to cleartext.
+ */
+function httpsUrlInProd(isProd: boolean) {
+  return z
+    .string()
+    .url()
+    .refine((value) => {
+      if (!isProd) return true;
+      let protocol: string;
+      try {
+        protocol = new URL(value).protocol;
+      } catch {
+        // Leave malformed values to the .url() check; never throw from refine.
+        return true;
+      }
+      return protocol === 'https:';
+    }, 'must use https:// in production builds');
+}
+
+function buildEnvSchema(isProd: boolean) {
+  return z.object({
+    VITE_APP_URL: httpsUrlInProd(isProd),
+    VITE_SUPABASE_URL: httpsUrlInProd(isProd),
+    VITE_SUPABASE_ANON_KEY: z.string().min(1),
+    VITE_STELLAR_NETWORK: stellarNetworkSchema,
+    VITE_STELLAR_RPC_URL: httpsUrlInProd(isProd),
+    VITE_FACTORY_CONTRACT_ID: contractIdSchema,
+    VITE_USDC_CONTRACT_ID: contractIdSchema,
+    VITE_EXPLORER_BASE_URL: z.string().url(),
+    /**
+     * The application API. Optional, because the app still reads group state
+     * directly from the chain and works without a backend — only invite codes and
+     * notifications need one, and those screens say so rather than failing
+     * obscurely when it is absent.
+     */
+    VITE_API_BASE_URL: httpsUrlInProd(isProd).optional(),
+  });
+}
+
+/** Development-shaped schema: no https enforcement, so `http://localhost` parses. */
+export const envSchema = buildEnvSchema(false);
 
 export type Env = z.infer<typeof envSchema>;
+
+export interface ParseEnvOptions {
+  /**
+   * Whether to enforce https on the protected URLs. Defaults to
+   * `import.meta.env.PROD`, so production bundles are strict without any call
+   * site changing; tests can pass an explicit value to cover both modes.
+   */
+  prod?: boolean;
+}
 
 /**
  * Decodes a JWT payload for inspection only. This performs no signature
@@ -91,10 +130,11 @@ function assertNoElevatedCredentials(raw: Record<string, unknown>): void {
  * Throws with a descriptive message when configuration is missing or when an
  * elevated credential is detected.
  */
-export function parseEnv(raw: Record<string, unknown>): Env {
+export function parseEnv(raw: Record<string, unknown>, options: ParseEnvOptions = {}): Env {
   assertNoElevatedCredentials(raw);
 
-  const result = envSchema.safeParse(raw);
+  const isProd = options.prod ?? import.meta.env.PROD === true;
+  const result = buildEnvSchema(isProd).safeParse(raw);
   if (!result.success) {
     const issues = result.error.issues
       .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
