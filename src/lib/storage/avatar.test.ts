@@ -113,6 +113,15 @@ describe('the object key', () => {
     expect(isAvatarPathFor(key, OTHER)).toBe(false);
   });
 
+  it('treats a user id containing regex metacharacters literally', () => {
+    const hostile = 'a.+b';
+    const name = randomHex();
+    // The id's own path still matches: the metacharacters are taken literally.
+    expect(isAvatarPathFor(`users/${hostile}/avatar/${name}.png`, hostile)).toBe(true);
+    // A path the unescaped pattern would have (wrongly) matched does not.
+    expect(isAvatarPathFor(`users/axxb/avatar/${name}.png`, hostile)).toBe(false);
+  });
+
   it('refuses names that were not generated, other prefixes, and traversal', () => {
     expect(isAvatarPathFor(`users/${USER}/avatar/photo.png`, USER)).toBe(false);
     expect(isAvatarPathFor(`users/${OTHER}/avatar/${randomHex()}.png`, USER)).toBe(false);
