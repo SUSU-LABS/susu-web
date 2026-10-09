@@ -113,6 +113,16 @@ describe('the object key', () => {
     expect(isAvatarPathFor(key, OTHER)).toBe(false);
   });
 
+  it('treats regex metacharacters in user id literally', () => {
+    const weirdUser = 'user.name+1[test]*?^$';
+    const key = avatarObjectKey(weirdUser, 'webp', randomHex());
+    expect(isAvatarPathFor(key, weirdUser)).toBe(true);
+
+    // Characters like '.' or '*' must not act as wildcards
+    const spoofedPath = key.replace('user.name', 'userXname');
+    expect(isAvatarPathFor(spoofedPath, weirdUser)).toBe(false);
+  });
+
   it('refuses names that were not generated, other prefixes, and traversal', () => {
     expect(isAvatarPathFor(`users/${USER}/avatar/photo.png`, USER)).toBe(false);
     expect(isAvatarPathFor(`users/${OTHER}/avatar/${randomHex()}.png`, USER)).toBe(false);
