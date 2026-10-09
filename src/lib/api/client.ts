@@ -13,12 +13,19 @@
  * exercise every branch without a browser session or a network.
  *
  * WHAT IS DELIBERATELY ABSENT
- * No retry, and no timeout. Retrying is a policy that depends on the operation —
- * retrying a redeemed invite is safe, retrying anything that claims a use is not
- * something this layer can judge — and the callers that need it use React Query,
- * which owns that policy. A silent client-side timeout would also be a lie about
- * what happened to the request: the browser cancels its interest, not the
- * request, so the server may still have acted.
+ * No retry. Retrying is a policy that depends on the operation — retrying a
+ * redeemed invite is safe, retrying anything that claims a use is not something
+ * this layer can judge — and the callers that need it use React Query, which
+ * owns that policy.
+ *
+ * WHAT THE TIMEOUT MEANS
+ * Every request carries a timeout (`DEFAULT_REQUEST_TIMEOUT_MS`, overridable
+ * per request via `RequestOptions.timeoutMs`). A timeout is the client's own
+ * abort, reported as a retryable `ApiError` with code `'timeout'` — distinct
+ * from a caller abort, which is re-thrown unchanged so React Query treats it as
+ * a cancellation. The timeout is honest about what it knows: the browser
+ * stopped waiting, the server may still have acted, and the caller decides
+ * whether retrying is safe.
  */
 import { z } from 'zod';
 import { getEnv } from '../env';
@@ -67,7 +74,15 @@ export type RequestOptions<T = unknown> = {
   readonly signal?: AbortSignal | undefined;
   /** Optional Zod schema to runtime-validate response payload. */
   readonly schema?: z.ZodType<T> | undefined;
+  /**
+   * Milliseconds before the request is abandoned. Defaults to
+   * `DEFAULT_REQUEST_TIMEOUT_MS`. Pass `0` to disable the timeout.
+   */
+  readonly timeoutMs?: number | undefined;
 };
+
+/** How long a request may run before the client gives up on it. */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 function url(path: string): string {
   const base = getEnv().VITE_API_BASE_URL;
@@ -124,19 +139,49 @@ async function send(
   if (options.token !== undefined) headers['authorization'] = `Bearer ${options.token}`;
 
   let response: Response;
+  // The timeout is the client's own signal, so a timeout abort can be told
+  // apart from the caller's cancellation: a timed-out request is a failure
+  // worth reporting (and retrying), while a caller abort is not a failure.
+  const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const timeoutSignal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+  const signal =
+    options.signal === undefined
+      ? timeoutSignal
+      : timeoutSignal === undefined
+        ? options.signal
+        : AbortSignal.any([options.signal, timeoutSignal]);
   try {
     response = await fetch(url(path), {
       method: options.method ?? 'GET',
       headers,
       ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      ...(signal === undefined ? {} : { signal }),
     });
   } catch (error) {
     // A request that never arrived is a distinct failure from one the server
     // refused, and the difference matters to the user: one is worth retrying, the
     // other is not. An abort is not a failure and is re-thrown unchanged so
-    // React Query handles it as a cancellation.
-    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    // React Query handles it as a cancellation — unless the abort came from this
+    // client's own timeout, which is reported as a retryable ApiError.
+    // (`AbortSignal.timeout()` aborts with a `TimeoutError`; a caller abort is
+    // an `AbortError`.)
+    if (
+      error instanceof DOMException &&
+      (error.name === 'AbortError' || error.name === 'TimeoutError')
+    ) {
+      // Attribute the abort by reason identity, not by the `aborted` flag:
+      // `timeoutSignal.aborted` only says the timer fired, not that it caused
+      // *this* rejection. If the caller aborted first and the timer fired
+      // afterwards, the flag is true but the rejection is the caller's.
+      // `fetch` rejects with the aborting signal's `reason`, and
+      // `AbortSignal.any` propagates the first source's reason, so identity
+      // with `timeoutSignal.reason` holds exactly when the timeout caused
+      // this rejection.
+      if (timeoutSignal !== undefined && error === timeoutSignal.reason) {
+        throw new ApiError(0, 'timeout', 'The request timed out. Try again.');
+      }
+      throw error;
+    }
     throw new ApiError(0, undefined, 'The request could not reach the server.');
   }
 
