@@ -1,4 +1,5 @@
 import {
+  useId,
   useState,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
@@ -115,8 +116,24 @@ export interface FieldProps extends InputHTMLAttributes<HTMLInputElement> {
   readonly error?: string | undefined;
 }
 
-export function Field({ label, hint, error, id, className = '', ...rest }: FieldProps) {
-  const fieldId = id ?? rest.name ?? label.toLowerCase().replace(/\s+/g, '-');
+export function Field({
+  label,
+  hint,
+  error,
+  id,
+  className = '',
+  'aria-describedby': describedBy,
+  ...rest
+}: FieldProps) {
+  const generatedId = useId();
+  const fieldId = id ?? rest.name ?? generatedId;
+  const descriptionIds = [
+    describedBy,
+    hint === undefined ? undefined : `${fieldId}-hint`,
+    error === undefined ? undefined : `${fieldId}-error`,
+  ]
+    .filter((value): value is string => value !== undefined && value.length > 0)
+    .join(' ');
   return (
     <div className={className}>
       <label htmlFor={fieldId} className="block text-sm font-medium">
@@ -125,11 +142,15 @@ export function Field({ label, hint, error, id, className = '', ...rest }: Field
       <input
         id={fieldId}
         aria-invalid={error !== undefined}
-        aria-describedby={error === undefined ? undefined : `${fieldId}-error`}
-        className="mt-1.5 w-full rounded-lg border border-neutral-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-neutral-900 dark:border-neutral-700 dark:focus:border-neutral-100"
+        aria-describedby={descriptionIds.length === 0 ? undefined : descriptionIds}
+        className="mt-1.5 w-full rounded-lg border border-neutral-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-neutral-900 focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-2 dark:border-neutral-700 dark:focus:border-neutral-100 dark:focus-visible:ring-neutral-100 dark:focus-visible:ring-offset-neutral-950"
         {...rest}
       />
-      {hint === undefined ? null : <p className="mt-1 text-xs text-neutral-500">{hint}</p>}
+      {hint === undefined ? null : (
+        <p id={`${fieldId}-hint`} className="mt-1 text-xs text-neutral-500">
+          {hint}
+        </p>
+      )}
       {error === undefined ? null : (
         <p id={`${fieldId}-error`} className="mt-1 text-xs text-red-600 dark:text-red-400">
           {error}
@@ -152,7 +173,8 @@ export function SelectField({
   className = '',
   ...rest
 }: SelectFieldProps) {
-  const fieldId = id ?? rest.name ?? label.toLowerCase().replace(/\s+/g, '-');
+  const generatedId = useId();
+  const fieldId = id ?? rest.name ?? generatedId;
   return (
     <div className={className}>
       <label htmlFor={fieldId} className="block text-sm font-medium">
@@ -196,7 +218,6 @@ export function AddressChip({ value, label }: { value: string; label?: string })
     <span className="inline-flex items-center gap-1.5">
       {label === undefined ? null : <span className="text-xs text-neutral-500">{label}</span>}
       <code
-        aria-label={value}
         title={value}
         className="rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-xs dark:bg-neutral-800"
       >
