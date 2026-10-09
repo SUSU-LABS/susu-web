@@ -28,6 +28,11 @@ export const notificationSchema = z.object({
 });
 export type Notification = z.infer<typeof notificationSchema>;
 
+export const notificationsEnvelopeSchema = z.object({
+  unreadCount: z.number().int().nonnegative(),
+});
+export type NotificationsEnvelope = z.infer<typeof notificationsEnvelopeSchema>;
+
 /** A page of notifications, with how many are unread overall. */
 export type NotificationPage = ApiPage<Notification> & {
   readonly unreadCount: number;
@@ -51,21 +56,17 @@ export async function listNotifications(
   if (query.offset !== undefined) search.set('offset', String(query.offset));
   const encoded = search.toString();
 
-  const { page, body } = await apiRequestPageBody<Notification>(
+  const { page, body } = await apiRequestPageBody<Notification, NotificationsEnvelope>(
     `notifications${encoded === '' ? '' : `?${encoded}`}`,
     {
       token,
       ...(signal ? { signal } : {}),
       schema: notificationSchema,
+      bodySchema: notificationsEnvelopeSchema,
     },
   );
 
-  // A missing or malformed count is reported as zero rather than as `NaN`: a badge
-  // is decoration, and a badge reading "NaN" would be worse than none. The rows
-  // themselves were already validated by the page reader.
-  const unreadCount = typeof body.unreadCount === 'number' ? body.unreadCount : 0;
-
-  return { ...page, unreadCount };
+  return { ...page, unreadCount: body.unreadCount };
 }
 
 /**
