@@ -113,6 +113,45 @@ describe('the object key', () => {
     expect(isAvatarPathFor(key, OTHER)).toBe(false);
   });
 
+  it('treats every regex metacharacter in the user id literally', () => {
+    const userId = 'user.+*?^${}()|[]\\';
+    const key = avatarObjectKey(userId, 'png', 'a'.repeat(32));
+    expect(isAvatarPathFor(key, userId)).toBe(true);
+    expect(isAvatarPathFor(key, `${userId}other`)).toBe(false);
+  });
+
+  it('does not treat a dot in the user id as a wildcard', () => {
+    const name = 'a'.repeat(32);
+    expect(isAvatarPathFor(avatarObjectKey('team.member', 'png', name), 'team.member')).toBe(true);
+    expect(isAvatarPathFor(avatarObjectKey('teamXmember', 'png', name), 'team.member')).toBe(false);
+  });
+
+  it('does not treat a character class or quantifier as part of the user id pattern', () => {
+    const name = 'a'.repeat(32);
+    const userId = 'team[0-9]+';
+    expect(isAvatarPathFor(avatarObjectKey(userId, 'webp', name), userId)).toBe(true);
+    expect(isAvatarPathFor(avatarObjectKey('team123', 'webp', name), userId)).toBe(false);
+  });
+
+  it('keeps the whole avatar path constrained when the user id contains alternation', () => {
+    const name = 'a'.repeat(32);
+    const userId = 'alice|bob';
+    const key = avatarObjectKey(userId, 'png', name);
+    expect(isAvatarPathFor(key, userId)).toBe(true);
+    expect(isAvatarPathFor('users/alice', userId)).toBe(false);
+    expect(isAvatarPathFor(`bob/avatar/${name}.png`, userId)).toBe(false);
+    expect(isAvatarPathFor(`${key}/extra`, userId)).toBe(false);
+  });
+
+  it.each(['png', 'jpg', 'jpeg', 'webp'])(
+    'continues accepting existing avatar paths with the %s extension',
+    (extension) => {
+      expect(isAvatarPathFor(`users/${USER}/avatar/${'a'.repeat(32)}.${extension}`, USER)).toBe(
+        true,
+      );
+    },
+  );
+
   it('refuses names that were not generated, other prefixes, and traversal', () => {
     expect(isAvatarPathFor(`users/${USER}/avatar/photo.png`, USER)).toBe(false);
     expect(isAvatarPathFor(`users/${OTHER}/avatar/${randomHex()}.png`, USER)).toBe(false);
