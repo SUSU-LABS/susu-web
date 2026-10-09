@@ -54,6 +54,7 @@ describe('error tables', () => {
       17: 'GroupCompleted',
       18: 'ArithmeticOverflow',
       19: 'SplitInvariantViolated',
+      20: 'InvalidTreasury',
     });
   });
 
@@ -66,14 +67,15 @@ describe('error tables', () => {
       5: 'Paused',
       6: 'GroupNotFound',
       7: 'ArithmeticOverflow',
+      8: 'InvalidTreasury',
     });
   });
 
   it('covers every code from 1 to the declared maximum with no gaps', () => {
-    for (let code = 1; code <= 19; code += 1) {
+    for (let code = 1; code <= 20; code += 1) {
       expect(GROUP_ERRORS[code], `group code ${code}`).toBeDefined();
     }
-    for (let code = 1; code <= 7; code += 1) {
+    for (let code = 1; code <= 8; code += 1) {
       expect(FACTORY_ERRORS[code], `factory code ${code}`).toBeDefined();
     }
   });
@@ -112,6 +114,28 @@ describe('describeFailure', () => {
     // the wrong table would tell the user the wrong thing entirely.
     expect(asContractError(describeFailure(hostError(5), 'group')).name).toBe('NotOpen');
     expect(asContractError(describeFailure(hostError(5), 'factory')).name).toBe('Paused');
+  });
+
+  it('decodes InvalidTreasury for both contracts', () => {
+    expect(asContractError(describeFailure(hostError(20), 'group')).name).toBe('InvalidTreasury');
+    expect(asContractError(describeFailure(hostError(8), 'factory')).name).toBe('InvalidTreasury');
+  });
+
+  it('maps every declared code to a name and a message', () => {
+    for (let code = 1; code <= 20; code += 1) {
+      const failure = asContractError(describeFailure(hostError(code), 'group'));
+      expect(failure.name, `group code ${code}`).not.toMatch(/^UnknownError/);
+      expect(failure.message, `group code ${code}`).not.toBe(
+        `The contract refused this action (error ${code}).`,
+      );
+    }
+    for (let code = 1; code <= 8; code += 1) {
+      const failure = asContractError(describeFailure(hostError(code), 'factory'));
+      expect(failure.name, `factory code ${code}`).not.toMatch(/^UnknownError/);
+      expect(failure.message, `factory code ${code}`).not.toBe(
+        `The contract refused this action (error ${code}).`,
+      );
+    }
   });
 
   it('presents the WAIT rule as a status rather than a fault', () => {
