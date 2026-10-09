@@ -85,3 +85,54 @@ describe('parseEnv', () => {
     }
   });
 });
+
+describe('parseEnv https enforcement in production', () => {
+  const protectedUrls = [
+    'VITE_APP_URL',
+    'VITE_SUPABASE_URL',
+    'VITE_STELLAR_RPC_URL',
+    'VITE_API_BASE_URL',
+  ] as const;
+
+  it('rejects an http:// value for each protected URL in production', () => {
+    for (const key of protectedUrls) {
+      expect(() => parseEnv(validEnv({ [key]: 'http://example.com' }), { prod: true })).toThrow(
+        /must use https:\/\/ in production builds/,
+      );
+    }
+  });
+
+  it('accepts https:// values for each protected URL in production', () => {
+    const env = validEnv({
+      VITE_APP_URL: 'https://app.example.com',
+      VITE_SUPABASE_URL: 'https://example.supabase.co',
+      VITE_STELLAR_RPC_URL: 'https://soroban-testnet.stellar.org',
+      VITE_API_BASE_URL: 'https://api.example.com',
+    });
+    expect(() => parseEnv(env, { prod: true })).not.toThrow();
+  });
+
+  it('still allows http://localhost in development', () => {
+    const env = validEnv({ VITE_APP_URL: 'http://localhost:5173' });
+    expect(() => parseEnv(env, { prod: false })).not.toThrow();
+  });
+
+  it('rejects http://localhost in production', () => {
+    const env = validEnv({ VITE_APP_URL: 'http://localhost:5173' });
+    expect(() => parseEnv(env, { prod: true })).toThrow(
+      /VITE_APP_URL: must use https:\/\/ in production builds/,
+    );
+  });
+
+  it('defaults to development mode under the test runner', () => {
+    // import.meta.env.PROD is false under vitest, so the default call shape
+    // used by the tests above must not enforce https.
+    expect(() => parseEnv(validEnv())).not.toThrow();
+  });
+
+  it('keeps the malformed-URL error for a non-url value even in production', () => {
+    expect(() => parseEnv(validEnv({ VITE_APP_URL: 'not-a-url' }), { prod: true })).toThrow(
+      /Invalid frontend environment configuration/,
+    );
+  });
+});

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { apiRequest, apiRequestPage, apiRequestPageBody } from './client';
+import { apiRequest, apiRequestPage, apiRequestPageBody, MAX_RESPONSE_BYTES } from './client';
 import { ApiError, apiErrorMessage, isRetryableApiError } from './errors';
 
 /**
@@ -321,5 +321,55 @@ describe('runtime schema validation', () => {
     const { page, body } = await apiRequestPageBody('test', { schema: itemSchema });
     expect(page.items[0]?.id).toBe('test-1');
     expect(body.extraField).toBe('hello');
+  });
+});
+
+describe('bounded response reads', () => {
+  function rawResponse(body: string, headers: Record<string, string> = {}): Response {
+    return new Response(body, {
+      status: 200,
+      headers: { 'content-type': 'application/json', ...headers },
+    });
+  }
+
+  it('rejects a body larger than the cap with a clear ApiError', async () => {
+    const oversizedBody = 'x'.repeat(MAX_RESPONSE_BYTES + 1);
+    fetchMock.mockResolvedValue(rawResponse(oversizedBody));
+
+    await expect(apiRequest('groups')).rejects.toMatchObject({
+      name: 'ApiError',
+      message: expect.stringMatching(/exceeds the \d+-byte limit/),
+    });
+  });
+
+  it('rejects from the declared content-length before reading the body', async () => {
+    // The body itself is small; only the declared length is over the cap, which
+    // is the honest-server fast path: fail without pulling any bytes.
+    fetchMock.mockResolvedValue(
+      rawResponse('{"data":null}', {
+        'content-length': String(MAX_RESPONSE_BYTES + 1),
+      }),
+    );
+
+    await expect(apiRequest('groups')).rejects.toMatchObject({
+      name: 'ApiError',
+      message: expect.stringMatching(/exceeds the \d+-byte limit/),
+    });
+  });
+
+  it('reads a body just under the cap normally', async () => {
+    const body = JSON.stringify({ data: { filler: 'x'.repeat(MAX_RESPONSE_BYTES - 32) } });
+    expect(body.length).toBeLessThan(MAX_RESPONSE_BYTES);
+    fetchMock.mockResolvedValue(rawResponse(body));
+
+    await expect(apiRequest('groups')).resolves.toMatchObject({
+      filler: expect.any(String),
+    });
+  });
+
+  it('still parses a normal small body', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { data: { ok: true } }));
+
+    await expect(apiRequest('groups')).resolves.toEqual({ ok: true });
   });
 });
