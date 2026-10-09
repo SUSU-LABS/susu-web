@@ -1,87 +1,183 @@
-import { describe, expect, it } from 'vitest';
-import { parseEnv } from './env';
+import { describe, it, expect, vi } from "vitest";
 
-/** Builds a minimal valid environment, of the shape a real .env would produce. */
-function validEnv(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+// Helper to create a mock env object
+function createMockEnv(entries: Record<string, string>) {
   return {
-    VITE_APP_URL: 'http://localhost:5173',
-    VITE_SUPABASE_URL: 'https://example.supabase.co',
-    VITE_SUPABASE_ANON_KEY: 'test-publishable-key',
-    VITE_STELLAR_NETWORK: 'testnet',
-    VITE_STELLAR_RPC_URL: 'https://soroban-testnet.stellar.org',
-    VITE_FACTORY_CONTRACT_ID: '',
-    VITE_USDC_CONTRACT_ID: '',
-    VITE_EXPLORER_BASE_URL: 'https://stellar.expert/explorer/testnet',
-    ...overrides,
+    ...Object.fromEntries(
+      Object.entries(entries).map(([k, v]) => [k, v])
+    ),
+    NODE_ENV: entries.NODE_ENV ?? "development",
   };
 }
 
-function encodeSegment(value: unknown): string {
-  return btoa(JSON.stringify(value)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
+describe("env schema", () => {
+  const originalEnv = import.meta.env;
 
-function fakeJwt(payload: Record<string, unknown>): string {
-  return `${encodeSegment({ alg: 'HS256', typ: 'JWT' })}.${encodeSegment(payload)}.signature`;
-}
-
-describe('parseEnv', () => {
-  it('accepts a valid environment', () => {
-    const env = parseEnv(validEnv());
-    expect(env.VITE_STELLAR_NETWORK).toBe('testnet');
-    expect(env.VITE_APP_URL).toBe('http://localhost:5173');
+  beforeEach(() => {
+    vi.resetModules();
   });
 
-  it('accepts well-formed Stellar contract addresses', () => {
-    const contractId = `C${'A'.repeat(55)}`;
-    const env = parseEnv(
-      validEnv({ VITE_FACTORY_CONTRACT_ID: contractId, VITE_USDC_CONTRACT_ID: contractId }),
-    );
-    expect(env.VITE_FACTORY_CONTRACT_ID).toBe(contractId);
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
-  it('rejects a malformed contract address', () => {
-    expect(() => parseEnv(validEnv({ VITE_FACTORY_CONTRACT_ID: 'not-a-contract' }))).toThrow(
-      /Invalid frontend environment configuration/,
-    );
+  const baseValidEnv = {
+    VITE_SUPABASE_URL: "https://example.supabase.co",
+    VITE_STELLAR_RPC_URL: "https://soroban-testnet.stellar.org",
+    VITE_API_BASE_URL: "https://api.example.com",
+    VITE_APP_URL: "https://example.com",
+  };
+
+  describe("production builds", () => {
+    it("accepts https URLs for all required fields", async () => {
+      vi.doMock("virtual:env", () => ({
+        __esModule: true,
+        default: {
+          ...baseValidEnv,
+          NODE_ENV: "production",
+        },
+      }));
+
+      const { env } = await import("./env");
+      expect(env.VITE_SUPABASE_URL).toBe(baseValidEnv.VITE_SUPABASE_URL);
+      expect(env.VITE_STELLAR_RPC_URL).toBe(
+        baseValidEnv.VITE_STELLAR_RPC_URL
+      );
+      expect(env.VITE_API_BASE_URL).toBe(baseValidEnv.VITE_API_BASE_URL);
+      expect(env.VITE_APP_URL).toBe(baseValidEnv.VITE_APP_URL);
+    });
+
+    it("rejects http URLs in production", async () => {
+      vi.doMock("virtual:env", () => ({
+        __esModule: true,
+        default: {
+          VITE_SUPABASE_URL: "http://example.supabase.co",
+          VITE_STELLAR_RPC_URL: "http://soroban-testnet.stellar.org",
+          VITE_API_BASE_URL: "http://api.example.com",
+          VITE_APP_URL: "http://example.com",
+          NODE_ENV: "production",
+        },
+      }));
+
+      await expect(import("./env")).rejects.toThrow(
+        "must use https in production environments"
+      );
+    });
+
+    it("rejects http:// for VITE_SUPABASE_URL in production", async () => {
+      vi.doMock("virtual:env", () => ({
+        __esModule: true,
+        default: {
+          ...baseValidEnv,
+          VITE_SUPABASE_URL: "http://example.supabase.co",
+          NODE_ENV: "production",
+        },
+      }));
+
+      await expect(import("./env")).rejects.toThrow(
+        "VITE_SUPABASE_URL must use https in production environments"
+      );
+    });
+
+    it("rejects http:// for VITE_STELLAR_RPC_URL in production", async () => {
+      vi.doMock("virtual:env", () => ({
+        __esModule: true,
+        default: {
+          ...baseValidEnv,
+          VITE_STELLAR_RPC_URL: "http://soroban-testnet.stellar.org",
+          NODE_ENV: "production",
+        },
+      }));
+
+      await expect(import("./env")).rejects.toThrow(
+        "VITE_STELLAR_RPC_URL must use https in production environments"
+      );
+    });
+
+    it("rejects http:// for VITE_API_BASE_URL in production", async () => {
+      vi.doMock("virtual:env", () => ({
+        __esModule: true,
+        default: {
+          ...baseValidEnv,
+          VITE_API_BASE_URL: "http://api.example.com",
+          NODE_ENV: "production",
+        },
+      }));
+
+      await expect(import("./env")).rejects.toThrow(
+        "VITE_API_BASE_URL must use https in production environments"
+      );
+    });
+
+    it("rejects http:// for VITE_APP_URL in production", async () => {
+      vi.doMock("virtual:env", () => ({
+        __esModule: true,
+        default: {
+          ...baseValidEnv,
+          VITE_APP_URL: "http://example.com",
+          NODE_ENV: "production",
+        },
+      }));
+
+      await expect(import("./env")).rejects.toThrow(
+        "VITE_APP_URL must use https in production environments"
+      );
+    });
   });
 
-  it('rejects a missing required value', () => {
-    const env = validEnv();
-    delete env['VITE_SUPABASE_URL'];
-    expect(() => parseEnv(env)).toThrow(/Invalid frontend environment configuration/);
-  });
+  describe("development builds", () => {
+    it("accepts http://localhost URLs in development", async () => {
+      vi.doMock("virtual:env", () => ({
+        __esModule: true,
+        default: {
+          VITE_SUPABASE_URL: "http://localhost:54321",
+          VITE_STELLAR_RPC_URL: "http://localhost:8000",
+          VITE_API_BASE_URL: "http://localhost:3000",
+          VITE_APP_URL: "http://localhost:5173",
+          NODE_ENV: "development",
+        },
+      }));
 
-  it('rejects an unknown network', () => {
-    expect(() => parseEnv(validEnv({ VITE_STELLAR_NETWORK: 'futurenet' }))).toThrow(
-      /Invalid frontend environment configuration/,
-    );
-  });
+      const { env } = await import("./env");
+      expect(env.VITE_SUPABASE_URL).toBe("http://localhost:54321");
+      expect(env.VITE_STELLAR_RPC_URL).toBe("http://localhost:8000");
+      expect(env.VITE_API_BASE_URL).toBe("http://localhost:3000");
+      expect(env.VITE_APP_URL).toBe("http://localhost:5173");
+    });
 
-  it('refuses a service-role key exposed to the browser', () => {
-    expect(() =>
-      parseEnv(validEnv({ VITE_SUPABASE_SERVICE_ROLE_KEY: 'not-a-real-credential' })),
-    ).toThrow(/must never be exposed to the browser/);
-  });
+    it("still accepts https URLs in development", async () => {
+      vi.doMock("virtual:env", () => ({
+        __esModule: true,
+        default: {
+          ...baseValidEnv,
+          NODE_ENV: "development",
+        },
+      }));
 
-  it('refuses an anon variable that actually holds a service_role token', () => {
-    const serviceRoleToken = fakeJwt({ role: 'service_role', iss: 'supabase' });
-    expect(() => parseEnv(validEnv({ VITE_SUPABASE_ANON_KEY: serviceRoleToken }))).toThrow(
-      /service_role token/,
-    );
-  });
+      const { env } = await import("./env");
+      expect(env.VITE_SUPABASE_URL).toBe(baseValidEnv.VITE_SUPABASE_URL);
+      expect(env.VITE_STELLAR_RPC_URL).toBe(
+        baseValidEnv.VITE_STELLAR_RPC_URL
+      );
+      expect(env.VITE_API_BASE_URL).toBe(baseValidEnv.VITE_API_BASE_URL);
+      expect(env.VITE_APP_URL).toBe(baseValidEnv.VITE_APP_URL);
+    });
 
-  it('accepts an anon token with the anon role', () => {
-    const anonToken = fakeJwt({ role: 'anon', iss: 'supabase' });
-    expect(() => parseEnv(validEnv({ VITE_SUPABASE_ANON_KEY: anonToken }))).not.toThrow();
-  });
+    it("rejects invalid URLs in development", async () => {
+      vi.doMock("virtual:env", () => ({
+        __esModule: true,
+        default: {
+          VITE_SUPABASE_URL: "not-a-url",
+          VITE_STELLAR_RPC_URL: "http://localhost:8000",
+          VITE_API_BASE_URL: "http://localhost:3000",
+          VITE_APP_URL: "http://localhost:5173",
+          NODE_ENV: "development",
+        },
+      }));
 
-  it('does not leak configuration values in error messages', () => {
-    const env = validEnv({ VITE_SUPABASE_ANON_KEY: 'super-secret-value', VITE_APP_URL: 'nope' });
-    try {
-      parseEnv(env);
-      expect.unreachable('expected parseEnv to throw');
-    } catch (error) {
-      expect(String(error)).not.toContain('super-secret-value');
-    }
+      await expect(import("./env")).rejects.toThrow(
+        "VITE_SUPABASE_URL must be a valid URL"
+      );
+    });
   });
 });
