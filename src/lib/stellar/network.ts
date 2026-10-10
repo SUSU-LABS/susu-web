@@ -37,15 +37,36 @@ export function passphraseFor(network: StellarNetwork): string {
   }
 }
 
+/** Known public RPC hosts for standard networks. */
+export const KNOWN_TESTNET_RPC_HOSTS = ['soroban-testnet.stellar.org', 'testnet.stellar.org'];
+export const KNOWN_MAINNET_RPC_HOSTS = [
+  'soroban-rpc.mainnet.stellar.org',
+  'mainnet.stellar.org',
+  'horizon.stellar.org',
+];
+
+export interface AssertRpcMatchesNetworkOptions {
+  /**
+   * Explicitly allows custom / unverified RPC hosts (e.g. private or third-party nodes).
+   *
+   * When false (default), non-local custom endpoints that do not match known network
+   * domain signatures are rejected to prevent unintended cross-network transaction preparation.
+   */
+  allowCustomRpc?: boolean;
+}
+
 /**
- * Rejects an RPC URL that names a different network than the configured one.
+ * Rejects an RPC URL that names a different network than the configured one, or that
+ * targets a custom host without explicit opt-in.
  *
  * This catches the mistake that matters: reading or writing one chain while
- * building transactions for another. The check only looks for an explicit
- * contradiction (`testnet` in the URL while configured for `mainnet`, or the
- * reverse) so that custom RPC providers are not rejected.
+ * building transactions for another.
  */
-export function assertRpcMatchesNetwork(network: StellarNetwork, rpcUrl: string): void {
+export function assertRpcMatchesNetwork(
+  network: StellarNetwork,
+  rpcUrl: string,
+  options: AssertRpcMatchesNetworkOptions = {},
+): void {
   if (rpcUrl.trim() === '') {
     throw new Error('Stellar RPC URL is empty.');
   }
@@ -65,6 +86,43 @@ export function assertRpcMatchesNetwork(network: StellarNetwork, rpcUrl: string)
       `Stellar RPC URL points at a testnet endpoint but the configured network is "mainnet". ` +
         'Refusing to continue: transactions would be built for the wrong network.',
     );
+  }
+
+  if (network === 'local') {
+    return;
+  }
+
+  try {
+    const parsed = new URL(rpcUrl);
+    const host = parsed.hostname.toLowerCase();
+    const isLocalhost = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+    if (isLocalhost) return;
+
+    const isKnownTestnet = KNOWN_TESTNET_RPC_HOSTS.some(
+      (h) => host === h || host.endsWith(`.${h}`),
+    );
+    const isKnownMainnet = KNOWN_MAINNET_RPC_HOSTS.some(
+      (h) => host === h || host.endsWith(`.${h}`),
+    );
+
+    if (network === 'testnet' && !isKnownTestnet && !mentionsTestnet && !options.allowCustomRpc) {
+      throw new Error(
+        `Custom RPC host "${host}" does not identify as a known testnet endpoint. ` +
+          'Refusing to continue without explicit custom RPC opt-in.',
+      );
+    }
+
+    if (network === 'mainnet' && !isKnownMainnet && !mentionsMainnet && !options.allowCustomRpc) {
+      throw new Error(
+        `Custom RPC host "${host}" does not identify as a known mainnet endpoint. ` +
+          'Refusing to continue without explicit custom RPC opt-in.',
+      );
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Refusing to continue')) {
+      throw error;
+    }
+    // Non-URL strings are handled by caller / URL parsing.
   }
 }
 
