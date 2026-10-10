@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { apiRequest, apiRequestPage, apiRequestPageBody } from './client';
+import { apiRequest, apiRequestPage, apiRequestPageBody, DEFAULT_TIMEOUT_MS } from './client';
 import { ApiError, apiErrorMessage, isRetryableApiError } from './errors';
 
 /**
@@ -8,8 +8,9 @@ import { ApiError, apiErrorMessage, isRetryableApiError } from './errors';
  *
  * `fetch` is stubbed rather than pointed at a server, so the cases worth testing
  * are reachable: a 502 from a proxy that returns HTML, a 204 with no body, a 2xx
- * that is not the documented envelope, and a request that never arrives. Those
- * are the paths a happy-path integration test never sees.
+ * that is not the documented envelope, a request that never arrives, one that
+ * exceeds its timeout, and an abort from outside. Those are the paths a
+ * happy-path integration test never sees.
  */
 
 const ENV = {
@@ -33,6 +34,22 @@ function jsonResponse(status: number, body: unknown): Response {
     status,
     headers: { 'content-type': 'application/json' },
   });
+}
+
+/**
+ * A fetch that never answers on its own, like the half-open connection the
+ * timeout exists for. It settles only when the request's own abort signal is
+ * aborted — with the signal's reason, as a real fetch does — so it fails
+ * loudly if the client never attaches a signal at all.
+ */
+function stallingFetch(): (url: RequestInfo | URL, init?: RequestInit) => Promise<never> {
+  return (_url: RequestInfo | URL, init?: RequestInit) => {
+    const signal = init?.signal;
+    if (!signal) return Promise.reject(new Error('the request carried no abort signal'));
+    return new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    });
+  };
 }
 
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -140,6 +157,48 @@ describe('apiRequest', () => {
     // A cancellation is not a failure, and React Query needs to recognise it as
     // one to avoid reporting an error to the user.
     await expect(apiRequest('groups')).rejects.toBe(abort);
+  });
+
+  it('rejects a request that exceeds its timeout with a distinct retryable error', async () => {
+    fetchMock.mockImplementation(stallingFetch());
+
+    const error = await apiRequest('groups', { timeoutMs: 25 }).catch((e: unknown) => e);
+
+    // The half-open connection the timeout exists for: without one, this
+    // request would stay pending forever. The failure is distinct from both a
+    // caller abort (not an error at all) and a refusal the server considered
+    // (status 0 with its own code), and it is retryable, so React Query can
+    // retry it.
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 0, code: 'request_timeout' });
+    expect(isRetryableApiError(error)).toBe(true);
+  });
+
+  it('propagates a caller abort unchanged even though every request carries a timeout', async () => {
+    fetchMock.mockImplementation(stallingFetch());
+
+    const controller = new AbortController();
+    const request = apiRequest('groups', { signal: controller.signal });
+    controller.abort();
+
+    // The caller's cancellation wins the race against the (much later)
+    // deadline, and its original reason reaches React Query untouched.
+    await expect(request).rejects.toBe(controller.signal.reason);
+  });
+
+  it('applies the default timeout when none is given, and honours an override', async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+    try {
+      fetchMock.mockResolvedValue(jsonResponse(200, { data: null }));
+      await apiRequest('groups');
+      expect(timeoutSpy).toHaveBeenCalledWith(DEFAULT_TIMEOUT_MS);
+
+      fetchMock.mockResolvedValue(jsonResponse(200, { data: null }));
+      await apiRequest('groups', { timeoutMs: 1_000 });
+      expect(timeoutSpy).toHaveBeenLastCalledWith(1_000);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
   });
 
   it('refuses a 2xx that is not the documented envelope', async () => {
