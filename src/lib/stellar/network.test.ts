@@ -16,6 +16,7 @@ function env(overrides: Partial<Env> = {}): Env {
     VITE_SUPABASE_ANON_KEY: 'test-publishable-key',
     VITE_STELLAR_NETWORK: 'testnet',
     VITE_STELLAR_RPC_URL: 'https://soroban-testnet.stellar.org',
+    VITE_STELLAR_RPC_IS_CUSTOM: false,
     VITE_FACTORY_CONTRACT_ID: '',
     VITE_USDC_CONTRACT_ID: '',
     VITE_EXPLORER_BASE_URL: 'https://stellar.expert/explorer/testnet',
@@ -42,8 +43,31 @@ describe('assertRpcMatchesNetwork', () => {
     ).not.toThrow();
   });
 
-  it('accepts a custom endpoint that names neither network', () => {
-    expect(() => assertRpcMatchesNetwork('testnet', 'https://rpc.example.com')).not.toThrow();
+  it('accepts a custom endpoint that names neither network when explicitly opted in', () => {
+    expect(() =>
+      assertRpcMatchesNetwork('testnet', 'https://rpc.example.com', {
+        customRpcAcknowledged: true,
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects a custom endpoint that names neither network without opt-in', () => {
+    expect(() => assertRpcMatchesNetwork('testnet', 'https://rpc.example.com')).toThrow(
+      /VITE_STELLAR_RPC_IS_CUSTOM/,
+    );
+  });
+
+  it('rejects a custom mainnet endpoint configured as testnet without opt-in', () => {
+    // The core issue case: no network token in the URL, so the old check
+    // passed silently. Now it must be rejected or explicitly opted into.
+    expect(() => assertRpcMatchesNetwork('testnet', 'https://rpc.myinfra.io/soroban')).toThrow(
+      /VITE_STELLAR_RPC_IS_CUSTOM/,
+    );
+    expect(() =>
+      assertRpcMatchesNetwork('testnet', 'https://rpc.myinfra.io/soroban', {
+        customRpcAcknowledged: true,
+      }),
+    ).not.toThrow();
   });
 
   it('rejects a mainnet endpoint while configured for testnet', () => {
@@ -89,5 +113,15 @@ describe('resolveNetworkConfig', () => {
     expect(() =>
       resolveNetworkConfig(env({ VITE_STELLAR_RPC_URL: 'https://soroban-mainnet.stellar.org' })),
     ).toThrow(/wrong network/);
+  });
+
+  it('rejects a custom host without the opt-in flag, accepts it with the flag', () => {
+    expect(() =>
+      resolveNetworkConfig(env({ VITE_STELLAR_RPC_URL: 'https://rpc.example.com' })),
+    ).toThrow(/VITE_STELLAR_RPC_IS_CUSTOM/);
+    const config = resolveNetworkConfig(
+      env({ VITE_STELLAR_RPC_URL: 'https://rpc.example.com', VITE_STELLAR_RPC_IS_CUSTOM: true }),
+    );
+    expect(config.rpcUrl).toBe('https://rpc.example.com');
   });
 });

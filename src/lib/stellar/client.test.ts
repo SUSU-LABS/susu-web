@@ -27,6 +27,7 @@ function env(overrides: Partial<Env> = {}): Env {
     VITE_FACTORY_CONTRACT_ID: '',
     VITE_USDC_CONTRACT_ID: '',
     VITE_EXPLORER_BASE_URL: 'https://stellar.expert/explorer/testnet',
+    VITE_STELLAR_RPC_IS_CUSTOM: false,
     ...overrides,
   };
 }
@@ -70,7 +71,9 @@ describe('Stellar client configuration and handles', () => {
     ['http://localhost:8000/soroban/rpc', true],
     ['https://rpc.example.com', false],
   ])('sets allowHttp from the RPC scheme for %s', (rpcUrl, allowHttp) => {
-    mocks.getEnv.mockReturnValue(env({ VITE_STELLAR_RPC_URL: rpcUrl }));
+    mocks.getEnv.mockReturnValue(
+      env({ VITE_STELLAR_RPC_URL: rpcUrl, VITE_STELLAR_RPC_IS_CUSTOM: true }),
+    );
     client.getSorobanServer();
     expect(mocks.Server).toHaveBeenCalledExactlyOnceWith(rpcUrl, { allowHttp });
   });
@@ -79,7 +82,9 @@ describe('Stellar client configuration and handles', () => {
     const firstConfig = client.getNetworkConfig();
     const firstServer = client.getSorobanServer();
     const nextRpc = 'http://localhost:8001/soroban/rpc';
-    mocks.getEnv.mockReturnValue(env({ VITE_STELLAR_RPC_URL: nextRpc }));
+    mocks.getEnv.mockReturnValue(
+      env({ VITE_STELLAR_RPC_URL: nextRpc, VITE_STELLAR_RPC_IS_CUSTOM: true }),
+    );
 
     client.resetStellarClientForTests();
 
