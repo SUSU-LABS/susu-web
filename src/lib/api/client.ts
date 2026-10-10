@@ -13,12 +13,18 @@
  * exercise every branch without a browser session or a network.
  *
  * WHAT IS DELIBERATELY ABSENT
- * No retry, and no timeout. Retrying is a policy that depends on the operation —
- * retrying a redeemed invite is safe, retrying anything that claims a use is not
- * something this layer can judge — and the callers that need it use React Query,
- * which owns that policy. A silent client-side timeout would also be a lie about
- * what happened to the request: the browser cancels its interest, not the
- * request, so the server may still have acted.
+ * No retry. Retrying is a policy that depends on the operation — retrying a
+ * redeemed invite is safe, retrying anything that claims a use is not something
+ * this layer can judge — and the callers that need it use React Query, which
+ * owns that policy.
+ *
+ * WHAT HAS A TIMEOUT
+ * Every request carries a deadline (`AbortSignal.timeout`). A half-open
+ * connection would otherwise leave React Query pending forever with no feedback
+ * for the user. The honest caveat still applies: timing out cancels the
+ * browser's interest, not the request, so the server may still have acted. A
+ * timed-out request is therefore reported as a distinct, retryable failure
+ * rather than a cancellation, and retrying it is left to React Query.
  */
 import { z } from 'zod';
 import { getEnv } from '../env';
@@ -57,6 +63,17 @@ export type ApiPage<T> = {
   readonly offset: number;
 };
 
+/**
+ * How long a request may take before it is aborted, in milliseconds.
+ *
+ * A value the caller can override per request via `RequestOptions.timeoutMs`.
+ * Chosen as a balance between an interactive client (a user will not wait
+ * much longer than this for feedback) and a slow connection (a request that
+ * is genuinely progressing should not be cut off mid-flight). `0` or a
+ * negative value aborts immediately, per `AbortSignal.timeout` semantics.
+ */
+export const DEFAULT_TIMEOUT_MS = 10_000;
+
 export type RequestOptions<T = unknown> = {
   readonly method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   /** Serialised as JSON. Omitted entirely when absent. */
@@ -65,6 +82,8 @@ export type RequestOptions<T = unknown> = {
   readonly token?: string | undefined;
   /** Aborts the request. A cancelled request never resolves. */
   readonly signal?: AbortSignal | undefined;
+  /** Milliseconds to wait for a response before aborting. Defaults to {@link DEFAULT_TIMEOUT_MS}. */
+  readonly timeoutMs?: number | undefined;
   /** Optional Zod schema to runtime-validate response payload. */
   readonly schema?: z.ZodType<T> | undefined;
 };
@@ -123,19 +142,33 @@ async function send(
   if (options.body !== undefined) headers['content-type'] = 'application/json';
   if (options.token !== undefined) headers['authorization'] = `Bearer ${options.token}`;
 
+  // The caller's own signal and the deadline are composed rather than chosen:
+  // every request carries a timeout, but a caller that wants to cancel keeps
+  // the ability to do so, and whichever fires first wins.
+  const timeoutSignal = AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const signal =
+    options.signal === undefined ? timeoutSignal : AbortSignal.any([options.signal, timeoutSignal]);
+
   let response: Response;
   try {
     response = await fetch(url(path), {
       method: options.method ?? 'GET',
       headers,
       ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      signal,
     });
   } catch (error) {
     // A request that never arrived is a distinct failure from one the server
-    // refused, and the difference matters to the user: one is worth retrying, the
-    // other is not. An abort is not a failure and is re-thrown unchanged so
-    // React Query handles it as a cancellation.
+    // refused, and the difference matters to the user: one is worth retrying,
+    // the other is not. A timed-out request never got its answer, so it is a
+    // failure too — a distinct, retryable one (status 0), so React Query can
+    // retry it without mistaking it for the server's considered refusal. An
+    // abort is not a failure and is re-thrown unchanged so React Query
+    // handles it as a cancellation.
+    if (timeoutSignal.aborted) {
+      throw new ApiError(0, 'request_timeout', 'The request timed out.');
+    }
+    if (options.signal?.aborted) throw error;
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
     throw new ApiError(0, undefined, 'The request could not reach the server.');
   }
