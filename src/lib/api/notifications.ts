@@ -40,6 +40,13 @@ export type NotificationPage = ApiPage<Notification> & {
  * that filtered a page would be filtering the wrong set: "the unread ones" is not
  * a subset of "the first twenty of all of them".
  */
+export const notificationsPageBodySchema = z
+  .object({
+    unreadCount: z.number().int().nonnegative(),
+  })
+  .passthrough();
+export type NotificationsPageBody = z.infer<typeof notificationsPageBodySchema>;
+
 export async function listNotifications(
   query: { unreadOnly?: boolean; limit?: number; offset?: number },
   token: string,
@@ -51,21 +58,17 @@ export async function listNotifications(
   if (query.offset !== undefined) search.set('offset', String(query.offset));
   const encoded = search.toString();
 
-  const { page, body } = await apiRequestPageBody<Notification>(
+  const { page, body } = await apiRequestPageBody<Notification, NotificationsPageBody>(
     `notifications${encoded === '' ? '' : `?${encoded}`}`,
     {
       token,
       ...(signal ? { signal } : {}),
       schema: notificationSchema,
+      bodySchema: notificationsPageBodySchema,
     },
   );
 
-  // A missing or malformed count is reported as zero rather than as `NaN`: a badge
-  // is decoration, and a badge reading "NaN" would be worse than none. The rows
-  // themselves were already validated by the page reader.
-  const unreadCount = typeof body.unreadCount === 'number' ? body.unreadCount : 0;
-
-  return { ...page, unreadCount };
+  return { ...page, unreadCount: body.unreadCount };
 }
 
 /**
