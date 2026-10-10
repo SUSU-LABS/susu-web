@@ -6,13 +6,8 @@ import { useAuth } from '@/lib/auth/context';
 import { signOutOtherSessions, updatePassword } from '@/lib/auth/actions';
 import { resetPasswordSchema, validate } from '@/lib/auth/validation';
 import { useStellar } from '@/lib/stellar/hooks';
-import {
-  avatarProblemMessage,
-  avatarSignedUrl,
-  removeAvatar,
-  uploadAvatar,
-  type AvatarProblem,
-} from '@/lib/storage/avatar';
+import { avatarProblemMessage, avatarSignedUrl, type AvatarProblem } from '@/lib/storage/avatar';
+import { clearAvatarPhoto, replaceAvatarPhoto } from '@/lib/storage/avatar-ops';
 import { useWallet } from '@/lib/wallet/context';
 import type { Account } from '@/lib/api/me';
 import {
@@ -91,25 +86,15 @@ function ProfileSection({ account }: { account: Account }) {
     setPhotoPending(true);
 
     try {
-      const uploaded = await uploadAvatar(account.userId, file);
-      if (!uploaded.ok) {
-        setPhotoProblem(uploaded.problem);
-        return;
-      }
-
-      // Upload first, then point the profile at it. If the write fails the new
-      // object is removed, so a failure leaves the account exactly as it was
-      // rather than referring to a photo that is not there.
-      try {
-        await updateProfile.mutateAsync({ avatarPath: uploaded.value.path });
-      } catch {
-        await removeAvatar(uploaded.value.path);
-        return;
-      }
-
-      // Only now is the replaced object unreferenced. Best effort: a photo that
-      // outlives its replacement is untidy, not broken.
-      if (avatarPath !== null) await removeAvatar(avatarPath);
+      // Upload, point the profile at it, and remove the replaced object as one
+      // operation — the ordering contract (and its tests) live in avatar-ops.
+      const result = await replaceAvatarPhoto({
+        userId: account.userId,
+        file,
+        currentPath: avatarPath,
+        writePath: (path) => updateProfile.mutateAsync({ avatarPath: path }),
+      });
+      if (!result.ok) setPhotoProblem(result.problem);
     } finally {
       setPhotoPending(false);
       if (fileInput.current !== null) fileInput.current.value = '';
@@ -121,19 +106,18 @@ function ProfileSection({ account }: { account: Account }) {
     setPhotoProblem(undefined);
     setPhotoPending(true);
 
-    // The reference is cleared first this time. The order is the reverse of the
-    // upload because the failure that matters is the opposite one: a profile
-    // pointing at an object that no longer exists would render as a broken image
-    // on every screen, while an object nothing points at is invisible.
     try {
-      await updateProfile.mutateAsync({ avatarPath: null });
-    } catch {
-      return;
+      // The reference is cleared before the object is removed: a profile pointing
+      // at a deleted object would render as a broken image, while an object
+      // nothing points at is invisible.
+      const result = await clearAvatarPhoto({
+        currentPath: avatarPath,
+        clearPath: () => updateProfile.mutateAsync({ avatarPath: null }),
+      });
+      if (!result.ok) setPhotoProblem(result.problem);
     } finally {
       setPhotoPending(false);
     }
-
-    await removeAvatar(avatarPath);
   }
 
   const nameChanged = displayName.trim() !== (account.displayName ?? '');

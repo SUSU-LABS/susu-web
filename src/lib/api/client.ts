@@ -85,6 +85,72 @@ function url(path: string): string {
 }
 
 /**
+ * The largest response body this client will read, in bytes.
+ *
+ * One mebibyte is far above what any current endpoint returns — the largest is a
+ * paginated list capped by the API at a small page size — and far below what a
+ * misconfigured proxy or a hostile endpoint could stream into memory. The cap is
+ * enforced while reading, so the client stops pulling bytes at the limit instead
+ * of buffering an unbounded body and only then discovering it is too large.
+ */
+export const MAX_RESPONSE_BYTES = 1_048_576;
+
+function oversizedBody(status: number): ApiError {
+  return new ApiError(
+    status,
+    undefined,
+    `The response body exceeds the ${MAX_RESPONSE_BYTES}-byte limit.`,
+  );
+}
+
+/**
+ * Reads the body as text, refusing anything over `MAX_RESPONSE_BYTES`.
+ *
+ * The body is consumed through its stream so the cap applies to bytes actually
+ * received — a declared `content-length` is only a hint and a hostile server is
+ * free to understate it. A `content-length` over the cap is still rejected
+ * up front, before a single byte is read, as a cheap early exit for the honest
+ * case.
+ */
+async function readBounded(response: Response): Promise<string> {
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) {
+    throw oversizedBody(response.status);
+  }
+
+  const reader = response.body?.getReader();
+  if (reader === undefined) {
+    // No stream (an empty body, or a host that hands back a buffered one):
+    // fall back to text() and bound the result after the fact.
+    const text = await response.text();
+    if (text.length > MAX_RESPONSE_BYTES) throw oversizedBody(response.status);
+    return text;
+  }
+
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_RESPONSE_BYTES) {
+      // Stop the transfer rather than draining the rest of an oversized body.
+      await reader.cancel().catch(() => undefined);
+      throw oversizedBody(response.status);
+    }
+    chunks.push(value);
+  }
+
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
+}
+
+/**
  * Reads a response body as JSON, or `undefined` if it is not JSON.
  *
  * A 502 from a proxy is HTML, and `response.json()` on it throws a `SyntaxError`
@@ -92,7 +158,7 @@ function url(path: string): string {
  * caller report the status, which is the informative part.
  */
 async function readJson(response: Response): Promise<unknown> {
-  const text = await response.text();
+  const text = await readBounded(response);
   if (text.length === 0) return undefined;
   try {
     return JSON.parse(text) as unknown;
