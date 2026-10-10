@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getConnectedAccount: vi.fn(),
+  connect: vi.fn(),
 }));
 
 vi.mock('@/lib/wallet', async (importOriginal) => {
@@ -18,7 +19,7 @@ vi.mock('@/lib/wallet', async (importOriginal) => {
         id: 'freighter',
         name: 'Freighter',
         isAvailable: vi.fn(async () => true),
-        connect: vi.fn(),
+        connect: mocks.connect,
         getConnectedAccount: mocks.getConnectedAccount,
         signTransaction: vi.fn(),
         signMessage: vi.fn(),
@@ -92,5 +93,52 @@ describe('WalletProvider account refresh', () => {
 
     expect(container.querySelector('output')?.textContent).toBe('none');
     expect(container.querySelector('output')?.dataset.status).toBe('disconnected');
+  });
+
+  it('guards connect against concurrent invocations', async () => {
+    let connectCalls = 0;
+    let resolveConnect!: (value: { address: string }) => void;
+    mocks.connect.mockImplementation(() => {
+      connectCalls += 1;
+      return new Promise<{ address: string }>((resolve) => {
+        resolveConnect = resolve;
+      });
+    });
+
+    function ConnectButton() {
+      const { connect, address, status } = useWallet();
+      return (
+        <div>
+          <button type="button" onClick={() => void connect()}>
+            Connect
+          </button>
+          <output data-status={status}>{address ?? 'none'}</output>
+        </div>
+      );
+    }
+
+    await act(async () => {
+      root.render(
+        <WalletProvider>
+          <ConnectButton />
+        </WalletProvider>,
+      );
+    });
+
+    const button = container.querySelector('button')!;
+    act(() => {
+      button.click();
+      button.click();
+    });
+
+    expect(connectCalls).toBe(1);
+
+    await act(async () => {
+      resolveConnect({ address: 'GCONCURRENT' });
+    });
+
+    expect(container.querySelector('output')?.textContent).toBe('GCONCURRENT');
+    expect(container.querySelector('output')?.dataset.status).toBe('connected');
+    expect(connectCalls).toBe(1);
   });
 });
