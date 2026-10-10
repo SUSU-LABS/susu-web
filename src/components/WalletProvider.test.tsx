@@ -1,12 +1,13 @@
 /**
  * @vitest-environment jsdom
  */
-import { act } from 'react';
+import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getConnectedAccount: vi.fn(),
+  connect: vi.fn(),
 }));
 
 vi.mock('@/lib/wallet', async (importOriginal) => {
@@ -18,7 +19,7 @@ vi.mock('@/lib/wallet', async (importOriginal) => {
         id: 'freighter',
         name: 'Freighter',
         isAvailable: vi.fn(async () => true),
-        connect: vi.fn(),
+        connect: mocks.connect,
         getConnectedAccount: mocks.getConnectedAccount,
         signTransaction: vi.fn(),
         signMessage: vi.fn(),
@@ -92,5 +93,61 @@ describe('WalletProvider account refresh', () => {
 
     expect(container.querySelector('output')?.textContent).toBe('none');
     expect(container.querySelector('output')?.dataset.status).toBe('disconnected');
+  });
+
+  it('guards connect against concurrent invocations using in-flight lock', async () => {
+    let resolvePrompt!: (account: { address: string }) => void;
+    const deferredPrompt = new Promise<{ address: string }>((resolve) => {
+      resolvePrompt = resolve;
+    });
+
+    mocks.getConnectedAccount.mockResolvedValue(null);
+    mocks.connect.mockImplementation(() => deferredPrompt);
+
+    let connectFn: (() => Promise<unknown>) | undefined;
+    function Harness() {
+      const wallet = useWallet();
+      useEffect(() => {
+        connectFn = wallet.connect;
+      });
+      return <output data-status={wallet.status}>{wallet.address ?? 'none'}</output>;
+    }
+
+    await act(async () => {
+      root.render(
+        <WalletProvider>
+          <Harness />
+        </WalletProvider>,
+      );
+    });
+
+    expect(container.querySelector('output')?.dataset.status).toBe('disconnected');
+    expect(connectFn).toBeDefined();
+
+    // Fire two rapid concurrent connect calls
+    let promise1!: Promise<unknown>;
+    let promise2!: Promise<unknown>;
+
+    await act(async () => {
+      promise1 = connectFn!();
+      promise2 = connectFn!();
+    });
+
+    // Exactly one connect / requestAccess prompt was initiated
+    expect(mocks.connect).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('output')?.dataset.status).toBe('connecting');
+
+    // Both returned the same in-flight promise
+    expect(promise1).toBe(promise2);
+
+    // Now resolve the deferred access prompt
+    await act(async () => {
+      resolvePrompt({ address: 'GCONNECTED' });
+      await promise1;
+    });
+
+    expect(mocks.connect).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('output')?.textContent).toBe('GCONNECTED');
+    expect(container.querySelector('output')?.dataset.status).toBe('connected');
   });
 });
