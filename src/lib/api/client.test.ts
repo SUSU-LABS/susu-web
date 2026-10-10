@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { apiRequest, apiRequestPage, apiRequestPageBody } from './client';
+import { apiRequest, apiRequestPage, apiRequestPageBody, MAX_RESPONSE_BODY_BYTES } from './client';
 import { ApiError, apiErrorMessage, isRetryableApiError } from './errors';
 
 /**
@@ -148,6 +148,26 @@ describe('apiRequest', () => {
     // Returning `undefined` here would make a contract mismatch look like a
     // successful call that produced nothing.
     await expect(apiRequest('groups')).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('rejects a body past the size limit with a clear error', async () => {
+    // A misconfigured proxy or a wrong endpoint can answer with a huge body
+    // (e.g. the SPA's index.html on a loop); without a bound the client
+    // buffers it all before the status/JSON checks ever run.
+    const huge = 'x'.repeat(MAX_RESPONSE_BODY_BYTES + 1);
+    fetchMock.mockResolvedValue(new Response(huge, { status: 200 }));
+
+    const error = await apiRequest('groups').catch((e) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe('response_too_large');
+  });
+
+  it('accepts a body exactly at the size limit', async () => {
+    // The limit is inclusive: a body that fits is still a normal response.
+    const padded = JSON.stringify({ data: null }).padEnd(MAX_RESPONSE_BODY_BYTES, ' ');
+    fetchMock.mockResolvedValue(new Response(padded, { status: 200 }));
+
+    await expect(apiRequest('groups')).resolves.toBeNull();
   });
 });
 
