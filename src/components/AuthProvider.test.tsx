@@ -155,6 +155,21 @@ describe('AuthProvider session observation', () => {
     expect(mocks.getSession).toHaveBeenCalledTimes(2);
   });
 
+  it('settles to anonymous without an unhandled rejection when session refresh rejects', async () => {
+    await mount();
+    await act(async () => firstRead.resolve({ data: { session: session('signed-in-user') } }));
+    expect(state()).toEqual({ status: 'authenticated', user: 'signed-in-user' });
+
+    mocks.getSession.mockRejectedValue(new Error('Network disconnected during refresh'));
+
+    await act(async () => {
+      await expect(auth.refresh()).resolves.toBeUndefined();
+    });
+
+    expect(state()).toEqual({ status: 'anonymous', user: 'none' });
+    expect(mocks.getSession).toHaveBeenCalledTimes(2);
+  });
+
   it('drops the local session when sign-out reports a revocation failure', async () => {
     await mount();
     await act(async () => firstRead.resolve({ data: { session: session('signed-in-user') } }));

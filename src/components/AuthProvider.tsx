@@ -31,8 +31,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refresh = useCallback(async (): Promise<void> => {
-    const { data } = await getSupabaseClient().auth.getSession();
-    applySession(data.session);
+    try {
+      const { data } = await getSupabaseClient().auth.getSession();
+      applySession(data.session);
+    } catch {
+      // A failure to refresh the session (e.g. network fault or deadlock recovery)
+      // must not produce an unhandled rejection at un-awaited call sites.
+      // Settle to anonymous, matching the initial-read error fallback.
+      applySession(null);
+    }
   }, [applySession]);
 
   useEffect(() => {
