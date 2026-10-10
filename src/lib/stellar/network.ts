@@ -37,15 +37,30 @@ export function passphraseFor(network: StellarNetwork): string {
   }
 }
 
+export interface RpcNetworkCheckOptions {
+  /**
+   * Whether the operator has explicitly acknowledged that the RPC URL points
+   * at a custom host they verified serves `network`. Required when the URL
+   * names neither network, because then a mismatch cannot be detected.
+   */
+  readonly customRpcAcknowledged?: boolean;
+}
+
 /**
  * Rejects an RPC URL that names a different network than the configured one.
  *
  * This catches the mistake that matters: reading or writing one chain while
- * building transactions for another. The check only looks for an explicit
+ * building transactions for another. The check looks for an explicit
  * contradiction (`testnet` in the URL while configured for `mainnet`, or the
- * reverse) so that custom RPC providers are not rejected.
+ * reverse). A URL that names neither network is a custom host — a mismatch
+ * there cannot be detected, so it is rejected unless the operator explicitly
+ * opts in (e.g. via `VITE_STELLAR_RPC_IS_CUSTOM`).
  */
-export function assertRpcMatchesNetwork(network: StellarNetwork, rpcUrl: string): void {
+export function assertRpcMatchesNetwork(
+  network: StellarNetwork,
+  rpcUrl: string,
+  opts: RpcNetworkCheckOptions = {},
+): void {
   if (rpcUrl.trim() === '') {
     throw new Error('Stellar RPC URL is empty.');
   }
@@ -64,6 +79,14 @@ export function assertRpcMatchesNetwork(network: StellarNetwork, rpcUrl: string)
     throw new Error(
       `Stellar RPC URL points at a testnet endpoint but the configured network is "mainnet". ` +
         'Refusing to continue: transactions would be built for the wrong network.',
+    );
+  }
+
+  if (!mentionsTestnet && !mentionsMainnet && !opts.customRpcAcknowledged) {
+    throw new Error(
+      `Stellar RPC URL (${rpcUrl}) does not name a network, so it cannot be checked against ` +
+        `the configured network "${network}". Refusing to continue: set VITE_STELLAR_RPC_IS_CUSTOM=true ` +
+        'to confirm this custom host actually serves the configured network.',
     );
   }
 }
@@ -94,7 +117,9 @@ export function resolveNetworkConfig(env: Env): NetworkConfig {
   const network = env.VITE_STELLAR_NETWORK;
   const rpcUrl = env.VITE_STELLAR_RPC_URL;
 
-  assertRpcMatchesNetwork(network, rpcUrl);
+  assertRpcMatchesNetwork(network, rpcUrl, {
+    customRpcAcknowledged: env.VITE_STELLAR_RPC_IS_CUSTOM,
+  });
 
   return {
     network,

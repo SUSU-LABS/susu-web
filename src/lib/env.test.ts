@@ -57,6 +57,20 @@ describe('parseEnv', () => {
     );
   });
 
+  it('parses the custom RPC opt-in flag explicitly, defaulting to false', () => {
+    expect(parseEnv(validEnv()).VITE_STELLAR_RPC_IS_CUSTOM).toBe(false);
+    expect(
+      parseEnv(validEnv({ VITE_STELLAR_RPC_IS_CUSTOM: 'true' })).VITE_STELLAR_RPC_IS_CUSTOM,
+    ).toBe(true);
+    expect(parseEnv(validEnv({ VITE_STELLAR_RPC_IS_CUSTOM: '1' })).VITE_STELLAR_RPC_IS_CUSTOM).toBe(
+      true,
+    );
+    // The string "false" must not coerce to true.
+    expect(
+      parseEnv(validEnv({ VITE_STELLAR_RPC_IS_CUSTOM: 'false' })).VITE_STELLAR_RPC_IS_CUSTOM,
+    ).toBe(false);
+  });
+
   it('refuses a service-role key exposed to the browser', () => {
     expect(() =>
       parseEnv(validEnv({ VITE_SUPABASE_SERVICE_ROLE_KEY: 'not-a-real-credential' })),

@@ -41,6 +41,21 @@ export const envSchema = z.object({
    * obscurely when it is absent.
    */
   VITE_API_BASE_URL: z.string().url().optional(),
+  /**
+   * Explicit opt-in for custom Stellar RPC hosts.
+   *
+   * `assertRpcMatchesNetwork` can only catch a mismatch when the RPC URL
+   * literally names `testnet` or `mainnet`. A mainnet RPC served from a custom
+   * host (no such token) configured as `testnet` would otherwise pass
+   * silently, and transactions could be built for the wrong network.
+   * Setting this to `true` records that the operator has verified the custom
+   * host actually serves `VITE_STELLAR_NETWORK`. Parsed explicitly — any value
+   * other than `true`/`1` (including `false`) leaves the guard on.
+   */
+  VITE_STELLAR_RPC_IS_CUSTOM: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true' || v === '1'),
 });
 
 export type Env = z.infer<typeof envSchema>;
