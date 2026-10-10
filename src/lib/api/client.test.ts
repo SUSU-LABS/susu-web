@@ -322,4 +322,70 @@ describe('runtime schema validation', () => {
     expect(page.items[0]?.id).toBe('test-1');
     expect(body.extraField).toBe('hello');
   });
+
+  it('validates extra body fields in apiRequestPageBody with bodySchema', async () => {
+    const extraSchema = z
+      .object({
+        unreadCount: z.number().int().nonnegative(),
+      })
+      .passthrough();
+
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'test-1', count: 5 }],
+        page: { limit: 10, offset: 0, hasMore: false },
+        unreadCount: 3,
+        extraTag: 'custom',
+      }),
+    );
+
+    const { page, body } = await apiRequestPageBody('test', {
+      schema: itemSchema,
+      bodySchema: extraSchema,
+    });
+    expect(page.items[0]?.id).toBe('test-1');
+    expect(body.unreadCount).toBe(3);
+    expect(body.extraTag).toBe('custom');
+  });
+
+  it('rejects missing extra body fields when bodySchema requires them', async () => {
+    const extraSchema = z.object({
+      unreadCount: z.number().int().nonnegative(),
+    });
+
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'test-1', count: 5 }],
+        page: { limit: 10, offset: 0, hasMore: false },
+      }),
+    );
+
+    await expect(
+      apiRequestPageBody('test', {
+        schema: itemSchema,
+        bodySchema: extraSchema,
+      }),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('rejects wrongly-typed extra body fields when bodySchema is provided', async () => {
+    const extraSchema = z.object({
+      unreadCount: z.number().int().nonnegative(),
+    });
+
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'test-1', count: 5 }],
+        page: { limit: 10, offset: 0, hasMore: false },
+        unreadCount: 'three',
+      }),
+    );
+
+    await expect(
+      apiRequestPageBody('test', {
+        schema: itemSchema,
+        bodySchema: extraSchema,
+      }),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
 });
