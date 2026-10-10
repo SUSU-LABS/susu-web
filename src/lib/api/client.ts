@@ -57,7 +57,7 @@ export type ApiPage<T> = {
   readonly offset: number;
 };
 
-export type RequestOptions<T = unknown> = {
+export type RequestOptions<T = unknown, B = unknown> = {
   readonly method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   /** Serialised as JSON. Omitted entirely when absent. */
   readonly body?: unknown;
@@ -67,6 +67,8 @@ export type RequestOptions<T = unknown> = {
   readonly signal?: AbortSignal | undefined;
   /** Optional Zod schema to runtime-validate response payload. */
   readonly schema?: z.ZodType<T> | undefined;
+  /** Optional Zod schema to runtime-validate extra response body fields. */
+  readonly bodySchema?: z.ZodType<B> | undefined;
 };
 
 function url(path: string): string {
@@ -268,11 +270,15 @@ export async function apiRequestPage<T>(
  * `pageOf` still validates the page, so a caller cannot be handed an `unreadCount`
  * from a response whose rows were shaped differently than expected.
  */
-export async function apiRequestPageBody<T>(
+export async function apiRequestPageBody<
+  T,
+  B extends Record<string, unknown> = Record<string, unknown>,
+>(
   path: string,
-  options: RequestOptions<T> = {},
+  options: RequestOptions<T, B> = {},
   itemSchema?: z.ZodType<T>,
-): Promise<{ page: ApiPage<T>; body: Record<string, unknown> }> {
+  bodySchema?: z.ZodType<B>,
+): Promise<{ page: ApiPage<T>; body: B }> {
   const { status, body } = await send(path, options);
 
   const page = pageOf(body);
@@ -298,5 +304,19 @@ export async function apiRequestPageBody<T>(
     items = validatedItems;
   }
 
-  return { page: { ...page, items }, body: body as Record<string, unknown> };
+  const effectiveBodySchema = bodySchema ?? options.bodySchema;
+  let validatedBody = body as B;
+  if (effectiveBodySchema) {
+    const bodyResult = effectiveBodySchema.safeParse(body);
+    if (!bodyResult.success) {
+      throw new ApiError(
+        status,
+        undefined,
+        `The server returned an unexpected body shape: ${bodyResult.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join(', ')}`,
+      );
+    }
+    validatedBody = bodyResult.data;
+  }
+
+  return { page: { ...page, items }, body: validatedBody };
 }

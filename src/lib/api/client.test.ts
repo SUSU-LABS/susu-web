@@ -322,4 +322,45 @@ describe('runtime schema validation', () => {
     expect(page.items[0]?.id).toBe('test-1');
     expect(body.extraField).toBe('hello');
   });
+
+  it('validates extra body fields in apiRequestPageBody with bodySchema', async () => {
+    const extraSchema = z
+      .object({
+        unreadCount: z.number(),
+      })
+      .passthrough();
+
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'test-1', count: 5 }],
+        page: { limit: 10, offset: 0, hasMore: false },
+        unreadCount: 3,
+      }),
+    );
+
+    const { page, body } = await apiRequestPageBody('test', {
+      schema: itemSchema,
+      bodySchema: extraSchema,
+    });
+    expect(page.items[0]?.id).toBe('test-1');
+    expect(body.unreadCount).toBe(3);
+  });
+
+  it('throws ApiError when extra body fields in apiRequestPageBody violate bodySchema', async () => {
+    const extraSchema = z.object({
+      unreadCount: z.number(),
+    });
+
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'test-1', count: 5 }],
+        page: { limit: 10, offset: 0, hasMore: false },
+        unreadCount: 'not-a-number',
+      }),
+    );
+
+    await expect(
+      apiRequestPageBody('test', { schema: itemSchema, bodySchema: extraSchema }),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
 });
