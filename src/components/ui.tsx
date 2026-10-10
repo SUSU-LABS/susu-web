@@ -1,5 +1,7 @@
 import {
+  useEffect,
   useId,
+  useRef,
   useState,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
@@ -200,12 +202,30 @@ export function SelectField({
 /** A short, monospaced rendering of an on-chain address with copy affordance and accessible name. */
 export function AddressChip({ value, label }: { value: string; label?: string }) {
   const [copied, setCopied] = useState(false);
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear any pending feedback timer on unmount so we never call
+  // setCopied on an unmounted component.
+  useEffect(() => {
+    return () => {
+      if (resetTimer.current !== null) {
+        clearTimeout(resetTimer.current);
+        resetTimer.current = null;
+      }
+    };
+  }, []);
 
   async function copy(): Promise<void> {
     try {
       await navigator.clipboard.writeText(value);
       setCopied(true);
-      setTimeout(() => {
+      // Clear a previous timer before scheduling a new one so rapid
+      // successive copies get one full confirmation window.
+      if (resetTimer.current !== null) {
+        clearTimeout(resetTimer.current);
+      }
+      resetTimer.current = setTimeout(() => {
+        resetTimer.current = null;
         setCopied(false);
       }, 2000);
     } catch {
