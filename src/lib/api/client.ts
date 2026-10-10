@@ -85,15 +85,87 @@ function url(path: string): string {
 }
 
 /**
- * Reads a response body as JSON, or `undefined` if it is not JSON.
+ * Maximum response body size accepted by the API client (1 MiB).
  *
- * A 502 from a proxy is HTML, and `response.json()` on it throws a `SyntaxError`
- * that says nothing about the actual problem. Returning `undefined` lets the
- * caller report the status, which is the informative part.
+ * Prevents runaway memory consumption or denial-of-service from misconfigured proxies,
+ * unexpected endpoints, or malicious payloads returning oversized bodies.
  */
-async function readJson(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if (text.length === 0) return undefined;
+export const MAX_RESPONSE_BYTES = 1024 * 1024; // 1 MiB
+
+/**
+ * Reads a response body through a streaming reader with a maximum byte limit,
+ * parsing it as JSON or returning `undefined` if non-JSON / empty.
+ *
+ * Throws an `ApiError` when the body exceeds `MAX_RESPONSE_BYTES`.
+ */
+async function readJson(
+  response: Response,
+  maxBytes: number = MAX_RESPONSE_BYTES,
+): Promise<unknown> {
+  const declaredLength = response.headers.get('content-length');
+  if (declaredLength !== null) {
+    const parsedLength = parseInt(declaredLength, 10);
+    if (!Number.isNaN(parsedLength) && parsedLength > maxBytes) {
+      throw new ApiError(
+        response.status,
+        'response_too_large',
+        `The response body exceeds the ${maxBytes}-byte limit.`,
+      );
+    }
+  }
+
+  if (!response.body) {
+    const text = await response.text();
+    if (text.length === 0) return undefined;
+    if (new TextEncoder().encode(text).byteLength > maxBytes) {
+      throw new ApiError(
+        response.status,
+        'response_too_large',
+        `The response body exceeds the ${maxBytes}-byte limit.`,
+      );
+    }
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      return undefined;
+    }
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        totalBytes += value.byteLength;
+        if (totalBytes > maxBytes) {
+          await reader.cancel();
+          throw new ApiError(
+            response.status,
+            'response_too_large',
+            `The response body exceeds the ${maxBytes}-byte limit.`,
+          );
+        }
+        chunks.push(value);
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (totalBytes === 0) return undefined;
+
+  const totalBuffer = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    totalBuffer.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  const text = new TextDecoder().decode(totalBuffer);
   try {
     return JSON.parse(text) as unknown;
   } catch {
