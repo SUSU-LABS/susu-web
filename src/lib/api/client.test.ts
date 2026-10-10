@@ -322,4 +322,50 @@ describe('runtime schema validation', () => {
     expect(page.items[0]?.id).toBe('test-1');
     expect(body.extraField).toBe('hello');
   });
+
+  describe('bounded response body reading', () => {
+    it('rejects responses with content-length exceeding MAX_RESPONSE_BYTES', async () => {
+      fetchMock.mockResolvedValue(
+        new Response(JSON.stringify({ data: 'ok' }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'content-length': String(2 * 1024 * 1024), // 2 MiB
+          },
+        }),
+      );
+
+      await expect(apiRequest('test')).rejects.toThrow(
+        /The response body exceeds the 1048576-byte limit/,
+      );
+    });
+
+    it('rejects oversized streamed responses without allocating whole payload', async () => {
+      const oversizedChunk = new Uint8Array(1.5 * 1024 * 1024); // 1.5 MiB chunk
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(oversizedChunk);
+          controller.close();
+        },
+      });
+
+      fetchMock.mockResolvedValue(
+        new Response(stream, {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+
+      await expect(apiRequest('test')).rejects.toThrow(
+        /The response body exceeds the 1048576-byte limit/,
+      );
+    });
+
+    it('parses normal-sized responses within the limit', async () => {
+      fetchMock.mockResolvedValue(jsonResponse(200, { data: { message: 'hello within limits' } }));
+
+      const result = await apiRequest<{ message: string }>('test');
+      expect(result).toEqual({ message: 'hello within limits' });
+    });
+  });
 });
