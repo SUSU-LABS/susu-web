@@ -142,6 +142,53 @@ describe('apiRequest', () => {
     await expect(apiRequest('groups')).rejects.toBe(abort);
   });
 
+  it('rejects with a distinct retryable ApiError when the request exceeds timeoutMs', async () => {
+    fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        const signal = init?.signal;
+        if (signal != null) {
+          signal.addEventListener('abort', () => {
+            reject(signal.reason ?? new DOMException('The operation was aborted', 'AbortError'));
+          });
+        }
+      });
+    });
+
+    const promise = apiRequest('slow-endpoint', { timeoutMs: 20 });
+    await expect(promise).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 0,
+      code: 'timeout',
+    });
+
+    try {
+      await promise;
+    } catch (error) {
+      expect(isRetryableApiError(error)).toBe(true);
+      expect(apiErrorMessage(error)).toMatch(/timed out/i);
+    }
+  });
+
+  it('propagates a caller-supplied abort unchanged without converting to timeout', async () => {
+    const controller = new AbortController();
+    fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        const signal = init?.signal;
+        if (signal != null) {
+          signal.addEventListener('abort', () => {
+            reject(signal.reason ?? new DOMException('The operation was aborted', 'AbortError'));
+          });
+        }
+      });
+    });
+
+    const callerReason = new DOMException('User cancelled operation', 'AbortError');
+    const promise = apiRequest('groups', { signal: controller.signal, timeoutMs: 5000 });
+    controller.abort(callerReason);
+
+    await expect(promise).rejects.toBe(callerReason);
+  });
+
   it('refuses a 2xx that is not the documented envelope', async () => {
     fetchMock.mockResolvedValue(jsonResponse(200, { unexpected: true }));
 
