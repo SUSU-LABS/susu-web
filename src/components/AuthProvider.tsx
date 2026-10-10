@@ -31,8 +31,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refresh = useCallback(async (): Promise<void> => {
-    const { data } = await getSupabaseClient().auth.getSession();
-    applySession(data.session);
+    try {
+      const { data } = await getSupabaseClient().auth.getSession();
+      applySession(data.session);
+    } catch {
+      // A refresh failure (network error, storage error) must not leave the
+      // provider in an unknown state, nor become an unhandled rejection at a
+      // call site that fires and forgets. Treat it as no session — the same
+      // choice as the initial read below; the next auth event will correct
+      // it if one arrives.
+      applySession(null);
+    }
   }, [applySession]);
 
   useEffect(() => {
