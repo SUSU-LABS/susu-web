@@ -84,4 +84,44 @@ describe('parseEnv', () => {
       expect(String(error)).not.toContain('super-secret-value');
     }
   });
+
+  describe('production https enforcement', () => {
+    it('rejects http URLs for critical variables in production', () => {
+      const cases: [string, Record<string, unknown>][] = [
+        ['VITE_APP_URL', { VITE_APP_URL: 'http://app.susu.money' }],
+        ['VITE_SUPABASE_URL', { VITE_SUPABASE_URL: 'http://example.supabase.co' }],
+        ['VITE_STELLAR_RPC_URL', { VITE_STELLAR_RPC_URL: 'http://soroban-mainnet.stellar.org' }],
+        ['VITE_API_BASE_URL', { VITE_API_BASE_URL: 'http://api.susu.money/v1' }],
+      ];
+
+      for (const [key, override] of cases) {
+        expect(
+          () => parseEnv(validEnv(override), { isProd: true }),
+          `expected ${key} with http:// to be rejected in production`,
+        ).toThrow(new RegExp(`${key} must use https in production`));
+      }
+    });
+
+    it('allows http://localhost and 127.0.0.1 in production and local development', () => {
+      const localEnv = validEnv({
+        VITE_APP_URL: 'http://localhost:5173',
+        VITE_STELLAR_RPC_URL: 'http://127.0.0.1:8000/soroban/rpc',
+        VITE_API_BASE_URL: 'http://localhost:3000/api/v1',
+      });
+
+      expect(() => parseEnv(localEnv, { isProd: true })).not.toThrow();
+      expect(() => parseEnv(localEnv, { isProd: false })).not.toThrow();
+    });
+
+    it('accepts valid https URLs in production', () => {
+      const prodEnv = validEnv({
+        VITE_APP_URL: 'https://app.susu.money',
+        VITE_SUPABASE_URL: 'https://example.supabase.co',
+        VITE_STELLAR_RPC_URL: 'https://soroban-mainnet.stellar.org',
+        VITE_API_BASE_URL: 'https://api.susu.money/v1',
+      });
+
+      expect(() => parseEnv(prodEnv, { isProd: true })).not.toThrow();
+    });
+  });
 });
