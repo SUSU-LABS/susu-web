@@ -42,20 +42,35 @@ describe('assertRpcMatchesNetwork', () => {
     ).not.toThrow();
   });
 
-  it('accepts a custom endpoint that names neither network', () => {
-    expect(() => assertRpcMatchesNetwork('testnet', 'https://rpc.example.com')).not.toThrow();
+  it('accepts a custom endpoint when explicitly opted into', () => {
+    expect(() =>
+      assertRpcMatchesNetwork('testnet', 'https://rpc.example.com', { allowCustomRpc: true }),
+    ).not.toThrow();
   });
 
-  it('rejects a mainnet endpoint while configured for testnet', () => {
-    expect(() => assertRpcMatchesNetwork('testnet', 'https://soroban-mainnet.stellar.org')).toThrow(
-      /wrong network/,
+  it('rejects a custom unverified endpoint when allowCustomRpc is false or omitted', () => {
+    expect(() => assertRpcMatchesNetwork('testnet', 'https://rpc.example.com')).toThrow(
+      /does not identify as a known testnet endpoint/,
+    );
+    expect(() => assertRpcMatchesNetwork('mainnet', 'https://rpc.example.com')).toThrow(
+      /does not identify as a known mainnet endpoint/,
     );
   });
 
-  it('rejects a testnet endpoint while configured for mainnet', () => {
-    expect(() => assertRpcMatchesNetwork('mainnet', 'https://soroban-testnet.stellar.org')).toThrow(
-      /wrong network/,
-    );
+  it('rejects a mainnet endpoint while configured for testnet even if opted into custom', () => {
+    expect(() =>
+      assertRpcMatchesNetwork('testnet', 'https://soroban-mainnet.stellar.org', {
+        allowCustomRpc: true,
+      }),
+    ).toThrow(/wrong network/);
+  });
+
+  it('rejects a testnet endpoint while configured for mainnet even if opted into custom', () => {
+    expect(() =>
+      assertRpcMatchesNetwork('mainnet', 'https://soroban-testnet.stellar.org', {
+        allowCustomRpc: true,
+      }),
+    ).toThrow(/wrong network/);
   });
 
   it('rejects an empty endpoint', () => {
