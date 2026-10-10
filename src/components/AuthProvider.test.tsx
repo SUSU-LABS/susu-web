@@ -155,6 +155,22 @@ describe('AuthProvider session observation', () => {
     expect(mocks.getSession).toHaveBeenCalledTimes(2);
   });
 
+  it('treats a failed refresh as no session instead of rejecting', async () => {
+    await mount();
+    await act(async () => firstRead.resolve({ data: { session: session('old-user') } }));
+    expect(state()).toEqual({ status: 'authenticated', user: 'old-user' });
+
+    mocks.getSession.mockRejectedValue(new Error('dummy refresh failure'));
+
+    // Must resolve, not reject: a call site that fires refresh() without
+    // awaiting would otherwise produce an unhandled promise rejection.
+    await act(async () => {
+      await expect(auth.refresh()).resolves.toBeUndefined();
+    });
+
+    expect(state()).toEqual({ status: 'anonymous', user: 'none' });
+  });
+
   it('drops the local session when sign-out reports a revocation failure', async () => {
     await mount();
     await act(async () => firstRead.resolve({ data: { session: session('signed-in-user') } }));
