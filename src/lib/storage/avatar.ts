@@ -75,7 +75,8 @@ export type AvatarProblem =
   | 'encode-failed'
   | 'upload-failed'
   | 'remove-failed'
-  | 'sign-failed';
+  | 'sign-failed'
+  | 'write-failed';
 
 export type AvatarFailure = { readonly ok: false; readonly problem: AvatarProblem };
 export type AvatarSuccess<T> = { readonly ok: true; readonly value: T };
@@ -100,6 +101,8 @@ export function avatarProblemMessage(problem: AvatarProblem): string {
       return 'The photo could not be removed. Try again.';
     case 'sign-failed':
       return 'The photo could not be displayed. Reload the page to try again.';
+    case 'write-failed':
+      return 'The photo could not be saved to your profile. Try again.';
   }
 }
 
