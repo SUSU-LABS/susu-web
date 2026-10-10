@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { parseEnv } from './env';
 
 /** Builds a minimal valid environment, of the shape a real .env would produce. */
@@ -83,5 +83,56 @@ describe('parseEnv', () => {
     } catch (error) {
       expect(String(error)).not.toContain('super-secret-value');
     }
+  });
+});
+
+describe('parseEnv HTTPS enforcement', () => {
+  const originalProd = import.meta.env.PROD;
+
+  afterEach(() => {
+    import.meta.env.PROD = originalProd;
+  });
+
+  function asProd(): void {
+    import.meta.env.PROD = true;
+  }
+
+  function asDev(): void {
+    import.meta.env.PROD = false;
+  }
+
+  it('rejects http:// URLs in production builds', () => {
+    asProd();
+    for (const key of [
+      'VITE_APP_URL',
+      'VITE_SUPABASE_URL',
+      'VITE_STELLAR_RPC_URL',
+      'VITE_API_BASE_URL',
+    ] as const) {
+      expect(() => parseEnv(validEnv({ [key]: 'http://example.com' }))).toThrow(/must use https/);
+    }
+  });
+
+  it('accepts https:// URLs in production builds', () => {
+    asProd();
+    const env = parseEnv(
+      validEnv({
+        VITE_APP_URL: 'https://app.example.com',
+        VITE_API_BASE_URL: 'https://api.example.com',
+      }),
+    );
+    expect(env.VITE_APP_URL).toBe('https://app.example.com');
+  });
+
+  it('accepts http://localhost in production builds', () => {
+    asProd();
+    const env = parseEnv(validEnv({ VITE_APP_URL: 'http://localhost:5173' }));
+    expect(env.VITE_APP_URL).toBe('http://localhost:5173');
+  });
+
+  it('accepts http:// URLs in development builds', () => {
+    asDev();
+    const env = parseEnv(validEnv({ VITE_APP_URL: 'http://example.com' }));
+    expect(env.VITE_APP_URL).toBe('http://example.com');
   });
 });
