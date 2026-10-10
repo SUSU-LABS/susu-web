@@ -31,8 +31,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refresh = useCallback(async (): Promise<void> => {
-    const { data } = await getSupabaseClient().auth.getSession();
-    applySession(data.session);
+    try {
+      const { data } = await getSupabaseClient().auth.getSession();
+      applySession(data.session);
+    } catch {
+      applySession(null);
+    }
   }, [applySession]);
 
   useEffect(() => {
