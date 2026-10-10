@@ -65,6 +65,26 @@ describe('listNotifications', () => {
 
     await expect(listNotifications({}, 'a-token')).rejects.toBeInstanceOf(ApiError);
   });
+
+  it('rejects a body missing unreadCount instead of defaulting to zero', async () => {
+    fetchMock.mockResolvedValue(
+      okPageWithBody([NOTIFICATION], { limit: 20, offset: 0, hasMore: false }, {}),
+    );
+
+    await expect(listNotifications({}, 'a-token')).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('rejects a body with a mistyped unreadCount', async () => {
+    fetchMock.mockResolvedValue(
+      okPageWithBody(
+        [NOTIFICATION],
+        { limit: 20, offset: 0, hasMore: false },
+        { unreadCount: 'three' },
+      ),
+    );
+
+    await expect(listNotifications({}, 'a-token')).rejects.toBeInstanceOf(ApiError);
+  });
 });
 
 describe('markNotificationRead', () => {
