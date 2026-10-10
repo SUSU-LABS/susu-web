@@ -101,4 +101,80 @@ describe('AddressChip accessibility and copy affordance', () => {
     const code = container.querySelector('code');
     expect(code?.getAttribute('aria-label')).toBe(TEST_ADDRESS);
   });
+
+  it('clears copy timeout on unmount without state updates', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: { writeText },
+    });
+
+    act(() => {
+      root.render(<AddressChip value={TEST_ADDRESS} />);
+    });
+
+    const copyBtn = container.querySelector('button');
+    await act(async () => {
+      copyBtn?.click();
+    });
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+    // Unmount before 2000ms timer fires
+    act(() => {
+      root.unmount();
+    });
+
+    // Advance time past 2000ms
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+
+    vi.useRealTimers();
+  });
+
+  it('resets timer on rapid repeated copy to maintain full feedback duration', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: { writeText },
+    });
+
+    act(() => {
+      root.render(<AddressChip value={TEST_ADDRESS} />);
+    });
+
+    const copyBtn = container.querySelector('button');
+    // First copy
+    await act(async () => {
+      copyBtn?.click();
+    });
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+    // Advance 1000ms (halfway)
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+    // Second copy at 1000ms
+    await act(async () => {
+      copyBtn?.click();
+    });
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+    // Advance another 1500ms (2500ms from start, but only 1500ms from 2nd click)
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    // Should still be in copied state
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+    // Advance remaining 600ms (2100ms from 2nd click)
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copy/i);
+
+    vi.useRealTimers();
+  });
 });
