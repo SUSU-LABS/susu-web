@@ -33,6 +33,12 @@ export type NotificationPage = ApiPage<Notification> & {
   readonly unreadCount: number;
 };
 
+/** The extra fields `GET /notifications` answers with, alongside the page. */
+const notificationsBodySchema = z.object({
+  /** Total unread notifications. Not derivable from the rows, so always present. */
+  unreadCount: z.number(),
+});
+
 /**
  * Lists notifications, newest first.
  *
@@ -51,21 +57,24 @@ export async function listNotifications(
   if (query.offset !== undefined) search.set('offset', String(query.offset));
   const encoded = search.toString();
 
-  const { page, body } = await apiRequestPageBody<Notification>(
+  const { page, body } = await apiRequestPageBody<
+    Notification,
+    z.infer<typeof notificationsBodySchema>
+  >(
     `notifications${encoded === '' ? '' : `?${encoded}`}`,
     {
       token,
       ...(signal ? { signal } : {}),
       schema: notificationSchema,
     },
+    undefined,
+    notificationsBodySchema,
   );
 
-  // A missing or malformed count is reported as zero rather than as `NaN`: a badge
-  // is decoration, and a badge reading "NaN" would be worse than none. The rows
-  // themselves were already validated by the page reader.
-  const unreadCount = typeof body.unreadCount === 'number' ? body.unreadCount : 0;
-
-  return { ...page, unreadCount };
+  // `unreadCount` was validated against the body schema above: a missing or
+  // mistyped count throws an ApiError instead of silently becoming `undefined`
+  // (or a "0" badge that hides a server regression).
+  return { ...page, unreadCount: body.unreadCount };
 }
 
 /**
