@@ -101,4 +101,83 @@ describe('AddressChip accessibility and copy affordance', () => {
     const code = container.querySelector('code');
     expect(code?.getAttribute('aria-label')).toBe(TEST_ADDRESS);
   });
+
+  it('resets timer window upon a rapid second copy without premature dismissal', async () => {
+    vi.useFakeTimers();
+    try {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, {
+        clipboard: { writeText },
+      });
+
+      act(() => {
+        root.render(<AddressChip value={TEST_ADDRESS} />);
+      });
+
+      const copyBtn = container.querySelector('button');
+
+      // First click
+      await act(async () => {
+        copyBtn?.click();
+      });
+      expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+      // Advance by 1500ms (500ms remaining on first timer)
+      act(() => {
+        vi.advanceTimersByTime(1500);
+      });
+      expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+      // Second click: resets window to 2000ms
+      await act(async () => {
+        copyBtn?.click();
+      });
+
+      // Advance 1000ms (original timer would have expired at 2000ms, but reset gives 2000ms from 2nd click)
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+      // Advance remaining 1000ms: now resets to copy
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(copyBtn?.getAttribute('aria-label')).toMatch(/copy/i);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears copy-feedback timer when unmounted', async () => {
+    vi.useFakeTimers();
+    try {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, {
+        clipboard: { writeText },
+      });
+
+      act(() => {
+        root.render(<AddressChip value={TEST_ADDRESS} />);
+      });
+
+      const copyBtn = container.querySelector('button');
+      await act(async () => {
+        copyBtn?.click();
+      });
+      expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+      // Unmount while timer is pending
+      act(() => {
+        root.unmount();
+      });
+
+      // Advancing timer after unmount should not throw or cause warning
+      act(() => {
+        vi.advanceTimersByTime(3000);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
