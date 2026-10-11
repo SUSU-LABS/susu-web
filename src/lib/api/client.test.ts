@@ -142,6 +142,51 @@ describe('apiRequest', () => {
     await expect(apiRequest('groups')).rejects.toBe(abort);
   });
 
+  it('abandons a request past its timeout and reports a distinct, retryable failure', async () => {
+    // A half-open connection: `fetch` never settles on its own, so only the
+    // deadline can end the request. The stub honours the signal the way a real
+    // `fetch` would, rejecting with an `AbortError` once it fires.
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => {
+            reject(new DOMException('aborted', 'AbortError'));
+          });
+        }),
+    );
+
+    const error = await apiRequest('groups', { timeoutMs: 10 }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 0, code: 'timeout' });
+    // Retryable: the same request may well succeed on a second attempt.
+    expect(isRetryableApiError(error)).toBe(true);
+    // Distinct from the generic "never arrived" failure, which carries no code.
+    expect(apiErrorMessage(error)).toBe('The server took too long to respond. Try again.');
+  });
+
+  it('propagates a caller abort unchanged rather than reporting a timeout', async () => {
+    const controller = new AbortController();
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          const abort = () => reject(new DOMException('aborted', 'AbortError'));
+          if (init.signal?.aborted) abort();
+          else init.signal?.addEventListener('abort', abort, { once: true });
+        }),
+    );
+
+    // A deadline is configured, yet the caller cancels first: the deadline must
+    // not claim the cancellation and turn it into a retryable error.
+    const pending = apiRequest('groups', { signal: controller.signal, timeoutMs: 10_000 });
+    controller.abort();
+
+    const error = await pending.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(DOMException);
+    expect((error as DOMException).name).toBe('AbortError');
+    expect(error).not.toBeInstanceOf(ApiError);
+  });
+
   it('refuses a 2xx that is not the documented envelope', async () => {
     fetchMock.mockResolvedValue(jsonResponse(200, { unexpected: true }));
 

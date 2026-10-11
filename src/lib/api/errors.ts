@@ -63,15 +63,22 @@ const MESSAGES: Record<string, string> = {
   invalid_nonce: 'That wallet-link request has expired. Start again.',
   invalid_signature: 'The signature did not match that wallet.',
   rate_limited: 'Too many requests. Wait a moment and try again.',
+  timeout: 'The server took too long to respond. Try again.',
 };
 
 /** A sentence for a person, from whatever went wrong. */
 export function apiErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
+    // An explicit code is the most specific thing this layer knows, so it wins
+    // even at status 0: a `timeout` is a different failure from a request that
+    // never left, and telling someone to check their connection for a request
+    // the server simply took too long to answer sends them after the wrong thing.
+    const mapped = error.code === undefined ? undefined : MESSAGES[error.code];
+    if (mapped !== undefined) return mapped;
     if (error.status === 0) {
       return 'Could not reach the server. Check your connection and try again.';
     }
-    return MESSAGES[error.code ?? ''] ?? 'Something went wrong. Try again.';
+    return 'Something went wrong. Try again.';
   }
 
   if (error instanceof Error && error.message.length > 0) return error.message;
