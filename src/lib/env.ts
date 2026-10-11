@@ -41,6 +41,26 @@ export const envSchema = z.object({
    * obscurely when it is absent.
    */
   VITE_API_BASE_URL: z.string().url().optional(),
+  /**
+   * Explicit opt-in for custom Stellar RPC hosts.
+   *
+   * assertRpcMatchesNetwork guards against cross-network configuration mismatches
+   * by verifying the RPC endpoint against the configured network. Known testnet/mainnet
+   * endpoints and local development URLs pass automatically, but custom RPC endpoints
+   * (e.g. private RPC nodes that do not contain network identifiers in their hostname)
+   * require this explicit opt-in to confirm the operator has verified the RPC host serves
+   * the configured network.
+   */
+  VITE_STELLAR_RPC_IS_CUSTOM: z
+    .preprocess((val) => {
+      if (typeof val === 'string') {
+        const lower = val.trim().toLowerCase();
+        if (lower === 'true' || lower === '1') return true;
+        if (lower === 'false' || lower === '0') return false;
+      }
+      return val;
+    }, z.boolean().optional())
+    .default(false),
 });
 
 export type Env = z.infer<typeof envSchema>;
