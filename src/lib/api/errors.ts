@@ -22,9 +22,9 @@
 
 /** A failure reported by the API, as opposed to a network or transport failure. */
 export class ApiError extends Error {
-  /** The HTTP status, or `0` when the request never reached the server. */
+  /** The HTTP status, or `0` when no complete response was received. */
   readonly status: number;
-  /** The API's machine-readable code, when it sent one. */
+  /** An API or client transport error code. */
   readonly code: string | undefined;
 
   constructor(status: number, code: string | undefined, message: string) {
@@ -68,6 +68,9 @@ const MESSAGES: Record<string, string> = {
 /** A sentence for a person, from whatever went wrong. */
 export function apiErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
+    if (error.code === 'timeout') {
+      return 'The request timed out. The server may still have acted; check its outcome before retrying.';
+    }
     if (error.status === 0) {
       return 'Could not reach the server. Check your connection and try again.';
     }
