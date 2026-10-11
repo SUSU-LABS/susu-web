@@ -85,3 +85,31 @@ describe('parseEnv', () => {
     }
   });
 });
+
+describe('production transport', () => {
+  const production = { PROD: true, VITE_APP_URL: 'https://app.example.com' };
+
+  it.each(['VITE_APP_URL', 'VITE_SUPABASE_URL', 'VITE_STELLAR_RPC_URL', 'VITE_API_BASE_URL'])(
+    'requires HTTPS for %s in production',
+    (key) => {
+      for (const url of ['http://example.com', 'http://localhost:5173', 'ftp://example.com']) {
+        expect(() => parseEnv(validEnv({ ...production, [key]: url }))).toThrow(
+          `${key}: HTTPS is required`,
+        );
+      }
+    },
+  );
+
+  it('accepts HTTPS production URLs with or without an optional API', () => {
+    expect(() => parseEnv(validEnv(production))).not.toThrow();
+    expect(() =>
+      parseEnv(validEnv({ ...production, VITE_API_BASE_URL: 'https://api.example.com' })),
+    ).not.toThrow();
+  });
+
+  it('allows local HTTP development endpoints', () => {
+    expect(() =>
+      parseEnv(validEnv({ PROD: false, VITE_API_BASE_URL: 'http://localhost:3000' })),
+    ).not.toThrow();
+  });
+});

@@ -102,6 +102,22 @@ export function parseEnv(raw: Record<string, unknown>): Env {
     throw new Error(`Invalid frontend environment configuration — ${issues}`);
   }
 
+  if (raw['PROD'] === true) {
+    for (const key of [
+      'VITE_APP_URL',
+      'VITE_SUPABASE_URL',
+      'VITE_STELLAR_RPC_URL',
+      'VITE_API_BASE_URL',
+    ] as const) {
+      const value = result.data[key];
+      if (value !== undefined && new URL(value).protocol !== 'https:') {
+        throw new Error(
+          `Invalid frontend environment configuration — ${key}: HTTPS is required in production`,
+        );
+      }
+    }
+  }
+
   return result.data;
 }
 
