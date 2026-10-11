@@ -65,9 +65,17 @@ export type RequestOptions<T = unknown> = {
   readonly token?: string | undefined;
   /** Aborts the request. A cancelled request never resolves. */
   readonly signal?: AbortSignal | undefined;
+  /**
+   * Request timeout in milliseconds. Defaults to `DEFAULT_REQUEST_TIMEOUT_MS`.
+   * Pass `0` or `Infinity` to disable timeout.
+   */
+  readonly timeoutMs?: number | undefined;
   /** Optional Zod schema to runtime-validate response payload. */
   readonly schema?: z.ZodType<T> | undefined;
 };
+
+/** Default timeout for API client requests (30 seconds). */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 function url(path: string): string {
   const base = getEnv().VITE_API_BASE_URL;
@@ -123,20 +131,42 @@ async function send(
   if (options.body !== undefined) headers['content-type'] = 'application/json';
   if (options.token !== undefined) headers['authorization'] = `Bearer ${options.token}`;
 
+  const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const timeoutSignal =
+    typeof timeoutMs === 'number' && timeoutMs > 0 && Number.isFinite(timeoutMs)
+      ? AbortSignal.timeout(timeoutMs)
+      : undefined;
+  const signal =
+    options.signal === undefined
+      ? timeoutSignal
+      : timeoutSignal === undefined
+        ? options.signal
+        : AbortSignal.any([options.signal, timeoutSignal]);
+
   let response: Response;
   try {
     response = await fetch(url(path), {
       method: options.method ?? 'GET',
       headers,
       ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      ...(signal === undefined ? {} : { signal }),
     });
   } catch (error) {
-    // A request that never arrived is a distinct failure from one the server
-    // refused, and the difference matters to the user: one is worth retrying, the
-    // other is not. An abort is not a failure and is re-thrown unchanged so
-    // React Query handles it as a cancellation.
-    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    // A request that timed out is reported as a distinct, retryable ApiError with code 'timeout'.
+    // A caller-supplied abort is not a failure and is re-thrown unchanged so React Query treats
+    // it as a cancellation.
+    if (
+      (error instanceof DOMException || error instanceof Error) &&
+      (error.name === 'AbortError' || error.name === 'TimeoutError')
+    ) {
+      if (timeoutSignal !== undefined && error === timeoutSignal.reason) {
+        throw new ApiError(0, 'timeout', 'The request timed out. Try again.');
+      }
+      if (error.name === 'TimeoutError') {
+        throw new ApiError(0, 'timeout', 'The request timed out. Try again.');
+      }
+      throw error;
+    }
     throw new ApiError(0, undefined, 'The request could not reach the server.');
   }
 
