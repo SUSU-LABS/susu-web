@@ -40,12 +40,15 @@ export function passphraseFor(network: StellarNetwork): string {
 /**
  * Rejects an RPC URL that names a different network than the configured one.
  *
- * This catches the mistake that matters: reading or writing one chain while
- * building transactions for another. The check only looks for an explicit
- * contradiction (`testnet` in the URL while configured for `mainnet`, or the
- * reverse) so that custom RPC providers are not rejected.
+ * Known endpoints are matched by origin, not by words inside an arbitrary URL.
+ * A custom provider requires an explicit operator opt-in after checking its
+ * network passphrase. This check does not attest the remote server's identity.
  */
-export function assertRpcMatchesNetwork(network: StellarNetwork, rpcUrl: string): void {
+export function assertRpcMatchesNetwork(
+  network: StellarNetwork,
+  rpcUrl: string,
+  allowCustom = false,
+): void {
   if (rpcUrl.trim() === '') {
     throw new Error('Stellar RPC URL is empty.');
   }
@@ -64,6 +67,20 @@ export function assertRpcMatchesNetwork(network: StellarNetwork, rpcUrl: string)
     throw new Error(
       `Stellar RPC URL points at a testnet endpoint but the configured network is "mainnet". ` +
         'Refusing to continue: transactions would be built for the wrong network.',
+    );
+  }
+
+  const endpoint = new URL(rpcUrl);
+  const known =
+    network === 'testnet'
+      ? endpoint.origin === 'https://soroban-testnet.stellar.org'
+      : network === 'mainnet'
+        ? endpoint.origin === 'https://soroban-mainnet.stellar.org'
+        : ['localhost', '127.0.0.1', '[::1]'].includes(endpoint.hostname);
+  if (!known && !allowCustom) {
+    throw new Error(
+      'Custom Stellar RPC endpoints require VITE_STELLAR_RPC_IS_CUSTOM=true. ' +
+        'Verify the provider network passphrase before opting in.',
     );
   }
 }
@@ -94,7 +111,7 @@ export function resolveNetworkConfig(env: Env): NetworkConfig {
   const network = env.VITE_STELLAR_NETWORK;
   const rpcUrl = env.VITE_STELLAR_RPC_URL;
 
-  assertRpcMatchesNetwork(network, rpcUrl);
+  assertRpcMatchesNetwork(network, rpcUrl, env.VITE_STELLAR_RPC_IS_CUSTOM === 'true');
 
   return {
     network,

@@ -51,6 +51,15 @@ describe('parseEnv', () => {
     expect(() => parseEnv(env)).toThrow(/Invalid frontend environment configuration/);
   });
 
+  it('requires an explicit boolean string for the custom RPC opt-in', () => {
+    expect(
+      parseEnv(validEnv({ VITE_STELLAR_RPC_IS_CUSTOM: 'true' })).VITE_STELLAR_RPC_IS_CUSTOM,
+    ).toBe('true');
+    expect(() => parseEnv(validEnv({ VITE_STELLAR_RPC_IS_CUSTOM: 'yes' }))).toThrow(
+      /RPC_IS_CUSTOM/,
+    );
+  });
+
   it('rejects an unknown network', () => {
     expect(() => parseEnv(validEnv({ VITE_STELLAR_NETWORK: 'futurenet' }))).toThrow(
       /Invalid frontend environment configuration/,
