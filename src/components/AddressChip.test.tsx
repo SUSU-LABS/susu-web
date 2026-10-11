@@ -101,4 +101,76 @@ describe('AddressChip accessibility and copy affordance', () => {
     const code = container.querySelector('code');
     expect(code?.getAttribute('aria-label')).toBe(TEST_ADDRESS);
   });
+
+  it('clears the copy-feedback timer on unmount (no setState after unmount)', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: { writeText },
+    });
+
+    act(() => {
+      root.render(<AddressChip value={TEST_ADDRESS} />);
+    });
+
+    const copyBtn = container.querySelector('button');
+    await act(async () => {
+      copyBtn?.click();
+    });
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+    // Unmount before the 2s timer fires; advancing timers must not throw
+    // or attempt a state update on the unmounted component.
+    act(() => root.unmount());
+    expect(() => {
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+    }).not.toThrow();
+    vi.useRealTimers();
+  });
+
+  it('rapid successive copies reset the feedback window instead of stacking timers', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: { writeText },
+    });
+
+    act(() => {
+      root.render(<AddressChip value={TEST_ADDRESS} />);
+    });
+
+    const copyBtn = container.querySelector('button');
+
+    // First copy at t=0
+    await act(async () => {
+      copyBtn?.click();
+    });
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+    // Second copy at t=1500ms, before the first timer fires
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    await act(async () => {
+      copyBtn?.click();
+    });
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+    // At t=3000ms the first (stale) timer would have fired; the feedback
+    // must still be visible because the second copy reset the window.
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+    // At t=3500ms (2s after the second copy) the feedback clears.
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copy/i);
+    expect(copyBtn?.getAttribute('aria-label')).not.toMatch(/copied/i);
+    vi.useRealTimers();
+  });
 });
