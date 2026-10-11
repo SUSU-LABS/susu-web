@@ -323,3 +323,25 @@ describe('runtime schema validation', () => {
     expect(body.extraField).toBe('hello');
   });
 });
+
+describe('response body cap', () => {
+  it('rejects an oversized body instead of buffering it', async () => {
+    const oversized = 'x'.repeat(4 * 1024 * 1024 + 1);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(oversized, { status: 200 })),
+    );
+    await expect(apiRequest('/v1/anything')).rejects.toBeInstanceOf(ApiError);
+    await expect(apiRequest('/v1/anything')).rejects.toMatchObject({
+      message: expect.stringContaining('cap'),
+    });
+  });
+
+  it('still parses a normal body', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, { data: { ok: true } })),
+    );
+    await expect(apiRequest('/v1/anything')).resolves.toEqual({ ok: true });
+  });
+});

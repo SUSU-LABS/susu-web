@@ -91,8 +91,51 @@ function url(path: string): string {
  * that says nothing about the actual problem. Returning `undefined` lets the
  * caller report the status, which is the informative part.
  */
+/** The largest response body the client will read — far past a real page. */
+const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Reads a response body with a hard size cap.
+ *
+ * `response.text()` buffers the entire body first, so a pathological or
+ * misconfigured endpoint could exhaust memory before any check ran. Read the
+ * stream chunk-wise and reject as soon as the cap is exceeded.
+ */
+async function readTextBounded(response: Response): Promise<string> {
+  const body = response.body;
+  if (body === null) return response.text();
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (received > MAX_RESPONSE_BYTES) {
+        await reader.cancel();
+        throw new ApiError(
+          0,
+          undefined,
+          `The response body exceeded the ${MAX_RESPONSE_BYTES}-byte cap.`,
+        );
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
 async function readJson(response: Response): Promise<unknown> {
-  const text = await response.text();
+  const text = await readTextBounded(response);
   if (text.length === 0) return undefined;
   try {
     return JSON.parse(text) as unknown;
