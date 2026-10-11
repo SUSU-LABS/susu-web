@@ -25,7 +25,19 @@ export const FORBIDDEN_ENV_KEYS = [
   'SERVICE_ROLE_KEY',
 ] as const;
 
-export const envSchema = z.object({
+/**
+ * Critical environment URLs that carry sensitive tokens, signed transaction
+ * submissions, or auth redirect targets. In production builds, these must strictly
+ * use https: to prevent leaking credentials over plain text.
+ */
+export const CRITICAL_URL_KEYS = [
+  'VITE_APP_URL',
+  'VITE_SUPABASE_URL',
+  'VITE_STELLAR_RPC_URL',
+  'VITE_API_BASE_URL',
+] as const;
+
+export const baseEnvSchema = z.object({
   VITE_APP_URL: z.string().url(),
   VITE_SUPABASE_URL: z.string().url(),
   VITE_SUPABASE_ANON_KEY: z.string().min(1),
@@ -43,7 +55,36 @@ export const envSchema = z.object({
   VITE_API_BASE_URL: z.string().url().optional(),
 });
 
-export type Env = z.infer<typeof envSchema>;
+/**
+ * Creates the environment schema, applying a refinement to enforce https:
+ * on critical URLs in production builds while allowing http: in local development.
+ */
+export function createEnvSchema(isProd = Boolean(import.meta.env?.PROD)) {
+  return baseEnvSchema.superRefine((data, ctx) => {
+    if (!isProd) return;
+    for (const key of CRITICAL_URL_KEYS) {
+      const val = data[key];
+      if (typeof val === 'string' && val.length > 0) {
+        try {
+          const url = new URL(val);
+          if (url.protocol !== 'https:') {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `${key} must use https in production`,
+              path: [key],
+            });
+          }
+        } catch {
+          // Handled by z.string().url()
+        }
+      }
+    }
+  });
+}
+
+export const envSchema = createEnvSchema();
+
+export type Env = z.infer<typeof baseEnvSchema>;
 
 /**
  * Decodes a JWT payload for inspection only. This performs no signature
@@ -85,16 +126,27 @@ function assertNoElevatedCredentials(raw: Record<string, unknown>): void {
   }
 }
 
+export type ParseEnvOptions = {
+  isProd?: boolean;
+  prod?: boolean;
+};
+
 /**
  * Validates raw environment values and returns typed config.
  *
  * Throws with a descriptive message when configuration is missing or when an
- * elevated credential is detected.
+ * elevated credential is detected. Enforces https: on critical URLs in production.
  */
-export function parseEnv(raw: Record<string, unknown>): Env {
+export function parseEnv(raw: Record<string, unknown>, options?: ParseEnvOptions | boolean): Env {
   assertNoElevatedCredentials(raw);
 
-  const result = envSchema.safeParse(raw);
+  const isProd =
+    typeof options === 'boolean'
+      ? options
+      : (options?.isProd ?? options?.prod ?? Boolean(import.meta.env?.PROD));
+
+  const schema = createEnvSchema(isProd);
+  const result = schema.safeParse(raw);
   if (!result.success) {
     const issues = result.error.issues
       .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
