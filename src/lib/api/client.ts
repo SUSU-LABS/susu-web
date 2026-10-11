@@ -24,6 +24,9 @@ import { z } from 'zod';
 import { getEnv } from '../env';
 import { ApiError } from './errors';
 
+/** Maximum decoded response bytes retained before parsing JSON (1 MiB). */
+export const MAX_API_RESPONSE_BYTES = 1024 * 1024;
+
 /** The JSON envelope every successful response uses. */
 type SuccessBody<T> = { data: T };
 
@@ -92,7 +95,33 @@ function url(path: string): string {
  * caller report the status, which is the informative part.
  */
 async function readJson(response: Response): Promise<unknown> {
-  const text = await response.text();
+  if (response.body === null) return undefined;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const chunks: string[] = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      // Count the actual stream, including decompressed bytes. Content-Length
+      // can be absent or false and is never an authority for this limit.
+      if (bytes > MAX_API_RESPONSE_BYTES) {
+        void reader.cancel().catch(() => undefined);
+        throw new ApiError(
+          response.status,
+          'response_too_large',
+          'The server response exceeds the 1 MiB limit.',
+        );
+      }
+      chunks.push(decoder.decode(value, { stream: true }));
+    }
+    chunks.push(decoder.decode());
+  } finally {
+    reader.releaseLock();
+  }
+  const text = chunks.join('');
   if (text.length === 0) return undefined;
   try {
     return JSON.parse(text) as unknown;

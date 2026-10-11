@@ -49,6 +49,7 @@ export function isRetryableApiError(error: unknown): boolean {
 }
 
 const MESSAGES: Record<string, string> = {
+  response_too_large: 'The server response is too large to display. Please try a smaller request.',
   invalid_request: 'That request was not something the server could accept.',
   unauthorized: 'Your session has expired. Sign in again and retry.',
   forbidden: 'This account is not allowed to do that.',
