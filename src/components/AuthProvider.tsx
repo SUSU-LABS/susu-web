@@ -31,8 +31,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refresh = useCallback(async (): Promise<void> => {
-    const { data } = await getSupabaseClient().auth.getSession();
-    applySession(data.session);
+    try {
+      const { data } = await getSupabaseClient().auth.getSession();
+      applySession(data.session);
+    } catch {
+      // Match the initial read: clear an unreadable session and let a later
+      // refresh or auth event restore it.
+      applySession(null);
+    }
   }, [applySession]);
 
   useEffect(() => {
