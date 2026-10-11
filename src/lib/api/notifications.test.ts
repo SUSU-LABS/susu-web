@@ -54,6 +54,26 @@ describe('listNotifications', () => {
     expect(result.unreadCount).toBe(1);
   });
 
+  it.each([undefined, null, '3', -1, 1.5])(
+    'rejects an invalid unread count: %s',
+    async (unreadCount) => {
+      fetchMock.mockResolvedValue(
+        okPageWithBody([], { limit: 20, offset: 0, hasMore: false }, { unreadCount }),
+      );
+      await expect(listNotifications({}, 'a-token')).rejects.toBeInstanceOf(ApiError);
+    },
+  );
+
+  it('preserves a zero unread count', async () => {
+    fetchMock.mockResolvedValue(
+      okPageWithBody([], { limit: 20, offset: 0, hasMore: false }, { unreadCount: 0 }),
+    );
+    await expect(listNotifications({}, 'a-token')).resolves.toMatchObject({
+      unreadCount: 0,
+      items: [],
+    });
+  });
+
   it('fails validation when notification items are malformed', async () => {
     fetchMock.mockResolvedValue(
       okPageWithBody(
