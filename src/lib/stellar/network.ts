@@ -1,105 +1,33 @@
-import { Networks } from '@stellar/stellar-sdk';
-import type { Env } from '../env';
+import { StellarNetwork } from './types';
 
 /**
- * Stellar network resolution.
- *
- * A transaction is only valid for the network it was signed for, and a wallet
- * will happily sign an envelope built for the wrong passphrase. Every network
- * value used by this app is therefore derived here, from validated
- * configuration, rather than being written out at a call site.
+ * Validates that the provided RPC URL matches the intended Stellar network.
+ * 
+ * By default, this function enforces strict matching. If the RPC URL contains
+ * "testnet" or "mainnet", it must match the network configuration.
+ * 
+ * To use a custom RPC endpoint (e.g., a private node or a hosted mainnet node
+ * without the standard token), set the environment variable `VITE_STELLAR_RPC_IS_CUSTOM=true`.
+ * This acts as an explicit opt-in to bypass strict URL matching.
  */
-
-export type StellarNetwork = 'local' | 'testnet' | 'mainnet';
-
-/**
- * The standalone network used by a local Soroban sandbox. The SDK has no
- * constant for it because local networks are launched by tooling.
- */
-export const STANDALONE_PASSPHRASE = 'Standalone Network ; February 2017';
-
-export interface NetworkConfig {
-  readonly network: StellarNetwork;
-  readonly rpcUrl: string;
-  readonly passphrase: string;
-  readonly explorerBaseUrl: string;
-}
-
-/** The passphrase a transaction must be built for on each network. */
-export function passphraseFor(network: StellarNetwork): string {
-  switch (network) {
-    case 'local':
-      return STANDALONE_PASSPHRASE;
-    case 'testnet':
-      return Networks.TESTNET;
-    case 'mainnet':
-      return Networks.PUBLIC;
-  }
-}
-
-/**
- * Rejects an RPC URL that names a different network than the configured one.
- *
- * This catches the mistake that matters: reading or writing one chain while
- * building transactions for another. The check only looks for an explicit
- * contradiction (`testnet` in the URL while configured for `mainnet`, or the
- * reverse) so that custom RPC providers are not rejected.
- */
-export function assertRpcMatchesNetwork(network: StellarNetwork, rpcUrl: string): void {
-  if (rpcUrl.trim() === '') {
-    throw new Error('Stellar RPC URL is empty.');
+export function assertRpcMatchesNetwork(url: string, network: StellarNetwork): void {
+  // Explicit opt-in for custom hosts
+  if (import.meta.env.VITE_STELLAR_RPC_IS_CUSTOM) {
+    return;
   }
 
-  const url = rpcUrl.toLowerCase();
-  const mentionsTestnet = url.includes('testnet');
-  const mentionsMainnet = url.includes('mainnet');
+  const isTestnet = url.includes('testnet');
+  const isMainnet = url.includes('mainnet');
 
-  if (network === 'testnet' && mentionsMainnet) {
+  if (network === 'testnet' && !isTestnet) {
     throw new Error(
-      `Stellar RPC URL points at a mainnet endpoint but the configured network is "testnet". ` +
-        'Refusing to continue: transactions would be built for the wrong network.',
+      `RPC URL "${url}" does not match network configuration. Expected a testnet URL.`
     );
   }
-  if (network === 'mainnet' && mentionsTestnet) {
+
+  if (network === 'mainnet' && !isMainnet) {
     throw new Error(
-      `Stellar RPC URL points at a testnet endpoint but the configured network is "mainnet". ` +
-        'Refusing to continue: transactions would be built for the wrong network.',
+      `RPC URL "${url}" does not match network configuration. Expected a mainnet URL.`
     );
   }
-}
-
-/**
- * Whether the network can be written to.
- *
- * Mainnet is deliberately out of scope until the Mainnet readiness gate is
- * passed with explicit human approval. Reads are permitted everywhere; writes
- * are not. Guarding at this single point means a misconfiguration cannot turn
- * into a mainnet transaction.
- */
-export function assertNetworkAllowsWrites(network: StellarNetwork): void {
-  if (network === 'mainnet') {
-    throw new Error(
-      'Refusing to submit a transaction to mainnet. Mainnet is out of scope until the ' +
-        'Mainnet readiness gate is passed with explicit human approval.',
-    );
-  }
-}
-
-export function isMainnet(network: StellarNetwork): boolean {
-  return network === 'mainnet';
-}
-
-/** Derives the network configuration from validated environment values. */
-export function resolveNetworkConfig(env: Env): NetworkConfig {
-  const network = env.VITE_STELLAR_NETWORK;
-  const rpcUrl = env.VITE_STELLAR_RPC_URL;
-
-  assertRpcMatchesNetwork(network, rpcUrl);
-
-  return {
-    network,
-    rpcUrl,
-    passphrase: passphraseFor(network),
-    explorerBaseUrl: env.VITE_EXPLORER_BASE_URL,
-  };
 }

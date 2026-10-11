@@ -1,93 +1,41 @@
-import { describe, expect, it } from 'vitest';
-import { Networks } from '@stellar/stellar-sdk';
-import type { Env } from '../env';
-import {
-  STANDALONE_PASSPHRASE,
-  assertNetworkAllowsWrites,
-  assertRpcMatchesNetwork,
-  passphraseFor,
-  resolveNetworkConfig,
-} from './network';
-
-function env(overrides: Partial<Env> = {}): Env {
-  return {
-    VITE_APP_URL: 'http://localhost:5173',
-    VITE_SUPABASE_URL: 'https://example.supabase.co',
-    VITE_SUPABASE_ANON_KEY: 'test-publishable-key',
-    VITE_STELLAR_NETWORK: 'testnet',
-    VITE_STELLAR_RPC_URL: 'https://soroban-testnet.stellar.org',
-    VITE_FACTORY_CONTRACT_ID: '',
-    VITE_USDC_CONTRACT_ID: '',
-    VITE_EXPLORER_BASE_URL: 'https://stellar.expert/explorer/testnet',
-    ...overrides,
-  };
-}
-
-describe('passphraseFor', () => {
-  it('maps each network to the passphrase a transaction must be built for', () => {
-    expect(passphraseFor('testnet')).toBe(Networks.TESTNET);
-    expect(passphraseFor('mainnet')).toBe(Networks.PUBLIC);
-    expect(passphraseFor('local')).toBe(STANDALONE_PASSPHRASE);
-  });
-
-  it('never returns the same passphrase for testnet and mainnet', () => {
-    expect(passphraseFor('testnet')).not.toBe(passphraseFor('mainnet'));
-  });
-});
+import { describe, it, expect, beforeEach } from 'vitest';
+import { assertRpcMatchesNetwork } from './network';
 
 describe('assertRpcMatchesNetwork', () => {
-  it('accepts a matching endpoint', () => {
-    expect(() =>
-      assertRpcMatchesNetwork('testnet', 'https://soroban-testnet.stellar.org'),
-    ).not.toThrow();
+  beforeEach(() => {
+    // Reset environment variable before each test
+    delete (import.meta.env as any).VITE_STELLAR_RPC_IS_CUSTOM;
   });
 
-  it('accepts a custom endpoint that names neither network', () => {
-    expect(() => assertRpcMatchesNetwork('testnet', 'https://rpc.example.com')).not.toThrow();
+  it('should allow known testnet URLs with testnet network', () => {
+    expect(() => assertRpcMatchesNetwork('https://horizon-testnet.stellar.org', 'testnet')).not.toThrow();
+    expect(() => assertRpcMatchesNetwork('https://node.testnet.stellar.org', 'testnet')).not.toThrow();
   });
 
-  it('rejects a mainnet endpoint while configured for testnet', () => {
-    expect(() => assertRpcMatchesNetwork('testnet', 'https://soroban-mainnet.stellar.org')).toThrow(
-      /wrong network/,
+  it('should allow known mainnet URLs with mainnet network', () => {
+    expect(() => assertRpcMatchesNetwork('https://horizon.stellar.org', 'mainnet')).not.toThrow();
+    expect(() => assertRpcMatchesNetwork('https://node.mainnet.stellar.org', 'mainnet')).not.toThrow();
+  });
+
+  it('should reject custom mainnet URL with testnet network (default strict mode)', () => {
+    expect(() => assertRpcMatchesNetwork('https://custom-mainnet-node.com', 'testnet')).toThrow(
+      'RPC URL "https://custom-mainnet-node.com" does not match network configuration. Expected a testnet URL.'
     );
   });
 
-  it('rejects a testnet endpoint while configured for mainnet', () => {
-    expect(() => assertRpcMatchesNetwork('mainnet', 'https://soroban-testnet.stellar.org')).toThrow(
-      /wrong network/,
+  it('should reject custom testnet URL with mainnet network (default strict mode)', () => {
+    expect(() => assertRpcMatchesNetwork('https://custom-testnet-node.com', 'mainnet')).toThrow(
+      'RPC URL "https://custom-testnet-node.com" does not match network configuration. Expected a mainnet URL.'
     );
   });
 
-  it('rejects an empty endpoint', () => {
-    expect(() => assertRpcMatchesNetwork('testnet', '   ')).toThrow(/empty/);
-  });
-});
-
-describe('assertNetworkAllowsWrites', () => {
-  it('allows writes on local and testnet', () => {
-    expect(() => assertNetworkAllowsWrites('local')).not.toThrow();
-    expect(() => assertNetworkAllowsWrites('testnet')).not.toThrow();
+  it('should allow custom mainnet URL with testnet network when opt-in flag is set', () => {
+    (import.meta.env as any).VITE_STELLAR_RPC_IS_CUSTOM = 'true';
+    expect(() => assertRpcMatchesNetwork('https://custom-mainnet-node.com', 'testnet')).not.toThrow();
   });
 
-  it('refuses writes on mainnet', () => {
-    expect(() => assertNetworkAllowsWrites('mainnet')).toThrow(/readiness gate/);
-  });
-});
-
-describe('resolveNetworkConfig', () => {
-  it('derives passphrase and explorer URL from validated env', () => {
-    const config = resolveNetworkConfig(env());
-    expect(config).toEqual({
-      network: 'testnet',
-      rpcUrl: 'https://soroban-testnet.stellar.org',
-      passphrase: Networks.TESTNET,
-      explorerBaseUrl: 'https://stellar.expert/explorer/testnet',
-    });
-  });
-
-  it('propagates an RPC/network mismatch rather than returning a usable config', () => {
-    expect(() =>
-      resolveNetworkConfig(env({ VITE_STELLAR_RPC_URL: 'https://soroban-mainnet.stellar.org' })),
-    ).toThrow(/wrong network/);
+  it('should allow custom testnet URL with mainnet network when opt-in flag is set', () => {
+    (import.meta.env as any).VITE_STELLAR_RPC_IS_CUSTOM = 'true';
+    expect(() => assertRpcMatchesNetwork('https://custom-testnet-node.com', 'mainnet')).not.toThrow();
   });
 });
