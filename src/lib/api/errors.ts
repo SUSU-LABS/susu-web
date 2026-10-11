@@ -63,11 +63,17 @@ const MESSAGES: Record<string, string> = {
   invalid_nonce: 'That wallet-link request has expired. Start again.',
   invalid_signature: 'The signature did not match that wallet.',
   rate_limited: 'Too many requests. Wait a moment and try again.',
+  timeout: 'The request took too long. Check your connection and try again.',
 };
 
 /** A sentence for a person, from whatever went wrong. */
 export function apiErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
+    if (error.code === 'timeout') {
+      return (
+        MESSAGES['timeout'] ?? 'The request took too long. Check your connection and try again.'
+      );
+    }
     if (error.status === 0) {
       return 'Could not reach the server. Check your connection and try again.';
     }

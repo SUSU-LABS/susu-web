@@ -142,6 +142,74 @@ describe('apiRequest', () => {
     await expect(apiRequest('groups')).rejects.toBe(abort);
   });
 
+  it('rejects with retryable timeout ApiError when request times out', async () => {
+    fetchMock.mockImplementation((_url, init) => {
+      return new Promise((_resolve, reject) => {
+        const signal = init?.signal as AbortSignal | undefined;
+        if (signal?.aborted) {
+          reject(signal.reason ?? new DOMException('The operation timed out.', 'TimeoutError'));
+        } else {
+          signal?.addEventListener('abort', () => {
+            reject(signal.reason ?? new DOMException('The operation timed out.', 'TimeoutError'));
+          });
+        }
+      });
+    });
+
+    const promise = apiRequest('groups', { timeoutMs: 10 });
+    await expect(promise).rejects.toMatchObject({
+      status: 0,
+      code: 'timeout',
+    });
+    await expect(promise).rejects.toBeInstanceOf(ApiError);
+    try {
+      await promise;
+    } catch (err) {
+      expect(isRetryableApiError(err)).toBe(true);
+      expect(apiErrorMessage(err)).toBe(
+        'The request took too long. Check your connection and try again.',
+      );
+    }
+  });
+
+  it('preserves caller-supplied abort unchanged even with timeout configured', async () => {
+    const controller = new AbortController();
+    fetchMock.mockImplementation((_url, init) => {
+      return new Promise((_resolve, reject) => {
+        const signal = init?.signal as AbortSignal | undefined;
+        signal?.addEventListener('abort', () => {
+          reject(new DOMException('aborted', 'AbortError'));
+        });
+      });
+    });
+
+    const promise = apiRequest('groups', { signal: controller.signal, timeoutMs: 5000 });
+    controller.abort();
+
+    await expect(promise).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('does not misattribute a caller abort as a timeout when the timer fires later', async () => {
+    const controller = new AbortController();
+    fetchMock.mockImplementation((_url, init) => {
+      return new Promise((_resolve, reject) => {
+        const signal = init?.signal as AbortSignal | undefined;
+        signal?.addEventListener('abort', () => {
+          setTimeout(() => {
+            reject(new DOMException('aborted by caller', 'AbortError'));
+          }, 30);
+        });
+      });
+    });
+
+    const pending = apiRequest('groups', { signal: controller.signal, timeoutMs: 10 });
+    controller.abort();
+
+    const error = await pending.catch((e) => e);
+    expect(error).toMatchObject({ name: 'AbortError' });
+    expect(error).not.toBeInstanceOf(ApiError);
+  });
+
   it('refuses a 2xx that is not the documented envelope', async () => {
     fetchMock.mockResolvedValue(jsonResponse(200, { unexpected: true }));
 
