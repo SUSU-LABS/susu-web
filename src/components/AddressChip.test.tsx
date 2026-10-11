@@ -27,6 +27,7 @@ describe('AddressChip accessibility and copy affordance', () => {
     act(() => root.unmount());
     container.remove();
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it('exposes the full 56-character address to assistive tech via accessible name', () => {
@@ -100,5 +101,48 @@ describe('AddressChip accessibility and copy affordance', () => {
     expect(container.textContent).toContain('Factory');
     const code = container.querySelector('code');
     expect(code?.getAttribute('aria-label')).toBe(TEST_ADDRESS);
+  });
+  it('keeps feedback for two seconds after the latest successful copy', async () => {
+    vi.useFakeTimers();
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    act(() => root.render(<AddressChip value={TEST_ADDRESS} />));
+    const button = container.querySelector('button')!;
+    await act(async () => button.click());
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    await act(async () => button.click());
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(button.getAttribute('aria-label')).toBe('Copied address to clipboard');
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(button.getAttribute('aria-label')).toBe('Copy address to clipboard');
+  });
+
+  it('clears the copy timer when removed', async () => {
+    vi.useFakeTimers();
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    act(() => root.render(<AddressChip value={TEST_ADDRESS} />));
+    await act(async () => container.querySelector('button')!.click());
+    expect(vi.getTimerCount()).toBe(1);
+    act(() => root.render(null));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('does not start a timer if the clipboard resolves after removal', async () => {
+    vi.useFakeTimers();
+    let complete!: () => void;
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: vi.fn(
+          () =>
+            new Promise<void>((resolve) => {
+              complete = resolve;
+            }),
+        ),
+      },
+    });
+    act(() => root.render(<AddressChip value={TEST_ADDRESS} />));
+    act(() => container.querySelector('button')!.click());
+    act(() => root.render(null));
+    await act(async () => complete());
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
