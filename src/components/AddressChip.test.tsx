@@ -36,8 +36,8 @@ describe('AddressChip accessibility and copy affordance', () => {
 
     const code = container.querySelector('code');
     expect(code).not.toBeNull();
-    // Accessible name must be the full address, not the truncated text
-    expect(code?.getAttribute('aria-label')).toBe(TEST_ADDRESS);
+    // No redundant aria-label on code; single accessible name provided by sr-only span
+    expect(code?.getAttribute('aria-label')).toBeNull();
 
     // Visually-hidden text contains full address for screen readers
     const srOnly = container.querySelector('.sr-only');
@@ -99,6 +99,26 @@ describe('AddressChip accessibility and copy affordance', () => {
 
     expect(container.textContent).toContain('Factory');
     const code = container.querySelector('code');
-    expect(code?.getAttribute('aria-label')).toBe(TEST_ADDRESS);
+    expect(code?.getAttribute('aria-label')).toBeNull();
+    const srOnly = container.querySelector('.sr-only');
+    expect(srOnly?.textContent).toBe(TEST_ADDRESS);
+  });
+
+  it('exposes exactly one accessible name without redundant aria-label on code element', () => {
+    act(() => {
+      root.render(<AddressChip value={TEST_ADDRESS} />);
+    });
+
+    const code = container.querySelector('code');
+    expect(code).not.toBeNull();
+    expect(code?.getAttribute('aria-label')).toBeNull();
+
+    const srOnly = container.querySelectorAll('.sr-only');
+    expect(srOnly).toHaveLength(1);
+    expect(srOnly[0]?.textContent).toBe(TEST_ADDRESS);
+
+    const hidden = code?.querySelectorAll('[aria-hidden="true"]');
+    expect(hidden).toHaveLength(1);
+    expect(hidden?.[0]?.textContent).toContain('…');
   });
 });
