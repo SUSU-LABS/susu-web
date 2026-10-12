@@ -252,8 +252,6 @@ describe('request deadlines and cancellation', () => {
     caller.abort(original);
     await assertion;
   });
-
-
 });
 
 describe('apiErrorMessage', () => {
