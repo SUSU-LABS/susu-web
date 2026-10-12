@@ -65,6 +65,8 @@ export type RequestOptions<T = unknown> = {
   readonly token?: string | undefined;
   /** Aborts the request. A cancelled request never resolves. */
   readonly signal?: AbortSignal | undefined;
+  /** Schema for required top-level response fields. */
+  readonly bodySchema?: z.ZodType<Record<string, unknown>> | undefined;
   /** Optional Zod schema to runtime-validate response payload. */
   readonly schema?: z.ZodType<T> | undefined;
 };
@@ -298,5 +300,18 @@ export async function apiRequestPageBody<T>(
     items = validatedItems;
   }
 
+  if (options.bodySchema) {
+    const result = options.bodySchema.safeParse(body);
+    if (!result.success) {
+      throw new ApiError(
+        status,
+        undefined,
+        'Unexpected page metadata: ' +
+          result.error.issues
+            .map((issue) => issue.path.join('.') + ': ' + issue.message)
+            .join(', '),
+      );
+    }
+  }
   return { page: { ...page, items }, body: body as Record<string, unknown> };
 }
