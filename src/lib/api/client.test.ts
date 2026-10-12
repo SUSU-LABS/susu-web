@@ -215,6 +215,30 @@ describe('apiRequestPage', () => {
   });
 });
 
+describe('page body metadata validation', () => {
+  it('rejects missing or invalid paginated metadata', async () => {
+    const schema = z.object({ unreadCount: z.number().int().nonnegative() });
+    for (const extra of [{}, { unreadCount: '1' }, { unreadCount: -1 }]) {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(200, { data: [], page: { limit: 20, offset: 0, hasMore: false }, ...extra }),
+      );
+      await expect(
+        apiRequestPageBody('notifications', { bodySchema: schema }),
+      ).rejects.toBeInstanceOf(ApiError);
+    }
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        data: [],
+        page: { limit: 20, offset: 0, hasMore: false },
+        unreadCount: 2,
+      }),
+    );
+    await expect(
+      apiRequestPageBody('notifications', { bodySchema: schema }),
+    ).resolves.toMatchObject({ body: { unreadCount: 2 } });
+  });
+});
+
 describe('apiErrorMessage', () => {
   it('explains an unknown code without quoting the code', () => {
     const message = apiErrorMessage(new ApiError(404, 'invite_not_found', 'raw'));
