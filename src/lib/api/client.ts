@@ -132,10 +132,8 @@ async function send(
   const onCallerAbort = (): void => controller.abort(options.signal?.reason);
   if (options.signal?.aborted) onCallerAbort();
   else options.signal?.addEventListener('abort', onCallerAbort, { once: true });
-  const timer = setTimeout(
-    () => controller.abort(new DOMException('Request timed out', 'TimeoutError')),
-    timeoutMs,
-  );
+  const timeoutReason = new DOMException('Request timed out', 'TimeoutError');
+  const timer = setTimeout(() => controller.abort(timeoutReason), timeoutMs);
 
   try {
     const response = await fetch(url(path), {
@@ -154,11 +152,7 @@ async function send(
     }
     return { status: response.status, body };
   } catch (error) {
-    if (
-      controller.signal.aborted &&
-      controller.signal.reason instanceof DOMException &&
-      controller.signal.reason.name === 'TimeoutError'
-    ) {
+    if (controller.signal.aborted && controller.signal.reason === timeoutReason) {
       throw new ApiError(0, 'timeout', 'The request timed out.');
     }
     if (options.signal?.aborted) {
