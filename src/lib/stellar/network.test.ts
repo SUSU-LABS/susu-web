@@ -42,8 +42,20 @@ describe('assertRpcMatchesNetwork', () => {
     ).not.toThrow();
   });
 
-  it('accepts a custom endpoint that names neither network', () => {
-    expect(() => assertRpcMatchesNetwork('testnet', 'https://rpc.example.com')).not.toThrow();
+  it('accepts a custom endpoint that names neither network when opted in', () => {
+    expect(() => assertRpcMatchesNetwork('testnet', 'https://rpc.example.com', true)).not.toThrow();
+  });
+
+  it('rejects a custom endpoint that names neither network without an opt-in', () => {
+    // The check cannot prove which chain an unmarked host serves — a silent
+    // mainnet behind it would sign for the wrong network, so the operator
+    // must say so with VITE_STELLAR_RPC_IS_CUSTOM.
+    expect(() => assertRpcMatchesNetwork('testnet', 'https://rpc.example.com')).toThrow(
+      /VITE_STELLAR_RPC_IS_CUSTOM/,
+    );
+    expect(() => assertRpcMatchesNetwork('mainnet', 'https://rpc.example.com')).toThrow(
+      /VITE_STELLAR_RPC_IS_CUSTOM/,
+    );
   });
 
   it('rejects a mainnet endpoint while configured for testnet', () => {
@@ -56,6 +68,13 @@ describe('assertRpcMatchesNetwork', () => {
     expect(() => assertRpcMatchesNetwork('mainnet', 'https://soroban-testnet.stellar.org')).toThrow(
       /wrong network/,
     );
+  });
+
+  it('accepts a localhost sandbox regardless of the configured network', () => {
+    expect(() =>
+      assertRpcMatchesNetwork('local', 'http://localhost:8000/soroban/rpc'),
+    ).not.toThrow();
+    expect(() => assertRpcMatchesNetwork('testnet', 'http://127.0.0.1:8000')).not.toThrow();
   });
 
   it('rejects an empty endpoint', () => {

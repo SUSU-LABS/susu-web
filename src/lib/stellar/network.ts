@@ -43,9 +43,17 @@ export function passphraseFor(network: StellarNetwork): string {
  * This catches the mistake that matters: reading or writing one chain while
  * building transactions for another. The check only looks for an explicit
  * contradiction (`testnet` in the URL while configured for `mainnet`, or the
- * reverse) so that custom RPC providers are not rejected.
+ * reverse). A URL that names neither — a custom host — cannot be checked this
+ * way at all, so it is refused unless the operator has explicitly opted in
+ * with `VITE_STELLAR_RPC_IS_CUSTOM`: an unmarked endpoint that silently serves
+ * mainnet while the app says testnet is exactly how a wallet signs a
+ * transaction for the wrong chain.
  */
-export function assertRpcMatchesNetwork(network: StellarNetwork, rpcUrl: string): void {
+export function assertRpcMatchesNetwork(
+  network: StellarNetwork,
+  rpcUrl: string,
+  customRpcOptIn = false,
+): void {
   if (rpcUrl.trim() === '') {
     throw new Error('Stellar RPC URL is empty.');
   }
@@ -53,6 +61,10 @@ export function assertRpcMatchesNetwork(network: StellarNetwork, rpcUrl: string)
   const url = rpcUrl.toLowerCase();
   const mentionsTestnet = url.includes('testnet');
   const mentionsMainnet = url.includes('mainnet');
+
+  // A development sandbox is not a public chain — localhost endpoints are
+  // exempt regardless of which network the config names.
+  const isSandboxHost = /^https?:\/\/(localhost|127\.0\.0\.1|\[?::1\]?)/.test(url);
 
   if (network === 'testnet' && mentionsMainnet) {
     throw new Error(
@@ -64,6 +76,14 @@ export function assertRpcMatchesNetwork(network: StellarNetwork, rpcUrl: string)
     throw new Error(
       `Stellar RPC URL points at a testnet endpoint but the configured network is "mainnet". ` +
         'Refusing to continue: transactions would be built for the wrong network.',
+    );
+  }
+
+  if (!mentionsTestnet && !mentionsMainnet && !isSandboxHost && !customRpcOptIn) {
+    throw new Error(
+      'Stellar RPC URL names neither testnet nor mainnet, so the check cannot prove it serves ' +
+        `the configured "${network}". If this is a deliberate custom endpoint, set ` +
+        'VITE_STELLAR_RPC_IS_CUSTOM=true to opt in.',
     );
   }
 }
@@ -94,7 +114,7 @@ export function resolveNetworkConfig(env: Env): NetworkConfig {
   const network = env.VITE_STELLAR_NETWORK;
   const rpcUrl = env.VITE_STELLAR_RPC_URL;
 
-  assertRpcMatchesNetwork(network, rpcUrl);
+  assertRpcMatchesNetwork(network, rpcUrl, env.VITE_STELLAR_RPC_IS_CUSTOM === 'true');
 
   return {
     network,
