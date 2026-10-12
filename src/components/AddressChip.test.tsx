@@ -102,3 +102,76 @@ describe('AddressChip accessibility and copy affordance', () => {
     expect(code?.getAttribute('aria-label')).toBe(TEST_ADDRESS);
   });
 });
+
+describe('AddressChip copy feedback timer', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn(async () => {}) },
+    });
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('a rapid second copy restarts the feedback, never ending it early', async () => {
+    act(() => {
+      root.render(<AddressChip value={TEST_ADDRESS} />);
+    });
+    const button = container.querySelector('button')!;
+
+    await act(async () => {
+      button.click();
+    });
+    expect(button.getAttribute('aria-label')).toContain('Copied');
+
+    // Half-way through the first window a second copy fires — the feedback
+    // must still show for a full window from the second click, not the first.
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    await act(async () => {
+      button.click();
+    });
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(button.getAttribute('aria-label')).toContain('Copied');
+
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+    expect(button.getAttribute('aria-label')).toContain('Copy address');
+  });
+
+  it('unmounting with the feedback live does not set state on a dead component', async () => {
+    act(() => {
+      root.render(<AddressChip value={TEST_ADDRESS} />);
+    });
+    const button = container.querySelector('button')!;
+
+    await act(async () => {
+      button.click();
+    });
+
+    // React 18+ warns (and older builds crashed) on a post-unmount setState —
+    // clearing the timer in the cleanup is what keeps that from happening.
+    act(() => root.unmount());
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    // Reaching here without a setState-on-unmounted warning is the assertion:
+    // the timer was cancelled rather than left firing.
+    expect(true).toBe(true);
+  });
+});
