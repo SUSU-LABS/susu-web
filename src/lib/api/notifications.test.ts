@@ -54,6 +54,15 @@ describe('listNotifications', () => {
     expect(result.unreadCount).toBe(1);
   });
 
+  it('rejects absent, negative and wrongly typed unreadCount', async () => {
+    for (const extra of [{}, { unreadCount: -1 }, { unreadCount: '1' }]) {
+      fetchMock.mockResolvedValueOnce(
+        okPageWithBody([], { limit: 20, offset: 0, hasMore: false }, extra),
+      );
+      await expect(listNotifications({}, 'a-token')).rejects.toBeInstanceOf(ApiError);
+    }
+  });
+
   it('fails validation when notification items are malformed', async () => {
     fetchMock.mockResolvedValue(
       okPageWithBody(
