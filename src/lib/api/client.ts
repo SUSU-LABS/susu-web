@@ -12,13 +12,12 @@
  * supplies the token, which keeps this module free of Supabase and lets the tests
  * exercise every branch without a browser session or a network.
  *
- * WHAT IS DELIBERATELY ABSENT
- * No retry, and no timeout. Retrying is a policy that depends on the operation —
- * retrying a redeemed invite is safe, retrying anything that claims a use is not
- * something this layer can judge — and the callers that need it use React Query,
- * which owns that policy. A silent client-side timeout would also be a lie about
- * what happened to the request: the browser cancels its interest, not the
- * request, so the server may still have acted.
+ * RETRIES AND REQUEST DEADLINES
+ * Retry policy belongs to callers (typically React Query), because whether an
+ * operation can be repeated depends on its semantics. A client-side request
+ * deadline prevents a permanently pending fetch and produces a retryable timeout
+ * error. Cancellation of client-side interest does not guarantee that the
+ * server did not process the request.
  */
 import { z } from 'zod';
 import { getEnv } from '../env';
