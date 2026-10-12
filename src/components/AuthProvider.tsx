@@ -31,7 +31,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refresh = useCallback(async (): Promise<void> => {
-    const { data } = await getSupabaseClient().auth.getSession();
+    // A rejecting read is the same answer the initial load gets: no session —
+    // never an unhandled rejection reaching whoever called refresh.
+    const { data } = await getSupabaseClient()
+      .auth.getSession()
+      .catch(() => ({ data: { session: null } }));
     applySession(data.session);
   }, [applySession]);
 

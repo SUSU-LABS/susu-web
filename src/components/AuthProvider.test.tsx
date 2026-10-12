@@ -155,6 +155,18 @@ describe('AuthProvider session observation', () => {
     expect(mocks.getSession).toHaveBeenCalledTimes(2);
   });
 
+  it('settles to anonymous when the refresh read rejects', async () => {
+    await mount();
+    await act(async () => firstRead.resolve({ data: { session: session('signed-in-user') } }));
+    mocks.getSession.mockRejectedValue(new Error('dummy refresh failure'));
+
+    // The rejection is handled inside refresh: the call resolves normally and
+    // the provider lands on the same answer the initial load gives.
+    await act(async () => auth.refresh());
+
+    expect(state()).toEqual({ status: 'anonymous', user: 'none' });
+  });
+
   it('drops the local session when sign-out reports a revocation failure', async () => {
     await mount();
     await act(async () => firstRead.resolve({ data: { session: session('signed-in-user') } }));
