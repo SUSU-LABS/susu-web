@@ -215,6 +215,60 @@ describe('apiRequestPage', () => {
   });
 });
 
+describe('request deadlines and cancellation', () => {
+  it('preserves a caller-supplied TimeoutError as cancellation', async () => {
+    const caller = new AbortController();
+    const original = new DOMException('caller deadline', 'TimeoutError');
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+        }),
+    );
+    const result = apiRequest('groups', { signal: caller.signal, timeoutMs: 5000 });
+    const assertion = expect(result).rejects.toBe(original);
+    caller.abort(original);
+    await assertion;
+  });
+
+  it('fails a hanging request with retryable timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockImplementation(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () =>
+              reject(init.signal?.reason ?? new DOMException('Aborted', 'AbortError')),
+            );
+          }),
+      );
+      const result = apiRequest('groups', { timeoutMs: 25 });
+      const assertion = expect(result).rejects.toMatchObject({ status: 0, code: 'timeout' });
+      await vi.advanceTimersByTimeAsync(25);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('propagates caller cancellation', async () => {
+    const caller = new AbortController();
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () =>
+            reject(init.signal?.reason ?? new DOMException('Aborted', 'AbortError')),
+          );
+        }),
+    );
+    const original = new DOMException('stop', 'AbortError');
+    const result = apiRequest('groups', { signal: caller.signal, timeoutMs: 5000 });
+    const assertion = expect(result).rejects.toBe(original);
+    caller.abort(original);
+    await assertion;
+  });
+});
+
 describe('apiErrorMessage', () => {
   it('explains an unknown code without quoting the code', () => {
     const message = apiErrorMessage(new ApiError(404, 'invite_not_found', 'raw'));

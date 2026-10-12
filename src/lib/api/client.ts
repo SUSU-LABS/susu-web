@@ -12,13 +12,12 @@
  * supplies the token, which keeps this module free of Supabase and lets the tests
  * exercise every branch without a browser session or a network.
  *
- * WHAT IS DELIBERATELY ABSENT
- * No retry, and no timeout. Retrying is a policy that depends on the operation —
- * retrying a redeemed invite is safe, retrying anything that claims a use is not
- * something this layer can judge — and the callers that need it use React Query,
- * which owns that policy. A silent client-side timeout would also be a lie about
- * what happened to the request: the browser cancels its interest, not the
- * request, so the server may still have acted.
+ * RETRIES AND REQUEST DEADLINES
+ * Retry policy belongs to callers (typically React Query), because whether an
+ * operation can be repeated depends on its semantics. A client-side request
+ * deadline prevents a permanently pending fetch and produces a retryable timeout
+ * error. Cancellation of client-side interest does not guarantee that the
+ * server did not process the request.
  */
 import { z } from 'zod';
 import { getEnv } from '../env';
@@ -65,6 +64,8 @@ export type RequestOptions<T = unknown> = {
   readonly token?: string | undefined;
   /** Aborts the request. A cancelled request never resolves. */
   readonly signal?: AbortSignal | undefined;
+  /** Milliseconds before cancelling the request (default 30000). */
+  readonly timeoutMs?: number | undefined;
   /** Optional Zod schema to runtime-validate response payload. */
   readonly schema?: z.ZodType<T> | undefined;
 };
@@ -121,36 +122,49 @@ async function send(
 ): Promise<{ status: number; body: unknown }> {
   const headers: Record<string, string> = { accept: 'application/json' };
   if (options.body !== undefined) headers['content-type'] = 'application/json';
-  if (options.token !== undefined) headers['authorization'] = `Bearer ${options.token}`;
+  if (options.token !== undefined) headers['authorization'] = 'Bearer ' + options.token;
 
-  let response: Response;
+  const timeoutMs = options.timeoutMs ?? 30_000;
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647) {
+    throw new RangeError('timeoutMs must be a positive integer within timer range.');
+  }
+  const controller = new AbortController();
+  const onCallerAbort = (): void => controller.abort(options.signal?.reason);
+  if (options.signal?.aborted) onCallerAbort();
+  else options.signal?.addEventListener('abort', onCallerAbort, { once: true });
+  const timeoutReason = new DOMException('Request timed out', 'TimeoutError');
+  const timer = setTimeout(() => controller.abort(timeoutReason), timeoutMs);
+
   try {
-    response = await fetch(url(path), {
+    const response = await fetch(url(path), {
       method: options.method ?? 'GET',
       headers,
       ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      signal: controller.signal,
     });
+    const body = await readJson(response);
+    if (!response.ok) {
+      throw new ApiError(
+        response.status,
+        codeOf(body),
+        'Request failed with status ' + response.status,
+      );
+    }
+    return { status: response.status, body };
   } catch (error) {
-    // A request that never arrived is a distinct failure from one the server
-    // refused, and the difference matters to the user: one is worth retrying, the
-    // other is not. An abort is not a failure and is re-thrown unchanged so
-    // React Query handles it as a cancellation.
+    if (controller.signal.aborted && controller.signal.reason === timeoutReason) {
+      throw new ApiError(0, 'timeout', 'The request timed out.');
+    }
+    if (options.signal?.aborted) {
+      throw options.signal.reason ?? new DOMException('Cancelled', 'AbortError');
+    }
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    if (error instanceof ApiError) throw error;
     throw new ApiError(0, undefined, 'The request could not reach the server.');
+  } finally {
+    clearTimeout(timer);
+    options.signal?.removeEventListener('abort', onCallerAbort);
   }
-
-  const body = await readJson(response);
-
-  if (!response.ok) {
-    throw new ApiError(
-      response.status,
-      codeOf(body),
-      `Request failed with status ${response.status}`,
-    );
-  }
-
-  return { status: response.status, body };
 }
 
 function hasData(body: unknown): body is SuccessBody<unknown> {
