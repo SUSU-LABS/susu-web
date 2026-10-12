@@ -104,6 +104,41 @@ describe('apiRequest', () => {
     await expect(apiRequest('notifications/x/read', { method: 'POST' })).resolves.toBeUndefined();
   });
 
+  it('rejects a request that exceeds its timeout with a retryable error', async () => {
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          (init.signal as AbortSignal | undefined)?.addEventListener('abort', () =>
+            reject(init.signal?.reason),
+          );
+        }),
+    );
+
+    const call = apiRequest('test', { timeoutMs: 15 });
+    await expect(call).rejects.toBeInstanceOf(ApiError);
+    await expect(call).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining('timed out'),
+    });
+    await expect(call).rejects.toSatisfy((e: unknown) => isRetryableApiError(e));
+  });
+
+  it('a caller abort propagates unchanged through the combined signal', async () => {
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          (init.signal as AbortSignal | undefined)?.addEventListener('abort', () =>
+            reject(init.signal?.reason),
+          );
+        }),
+    );
+
+    const controller = new AbortController();
+    const call = apiRequest('test', { signal: controller.signal, timeoutMs: 30_000 });
+    controller.abort();
+    await expect(call).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   it('reports the API’s error code', async () => {
     fetchMock.mockResolvedValue(jsonResponse(404, { error: 'invite_not_found' }));
 
