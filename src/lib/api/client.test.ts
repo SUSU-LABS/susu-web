@@ -216,6 +216,21 @@ describe('apiRequestPage', () => {
 });
 
 describe('request deadlines and cancellation', () => {
+  it('preserves a caller-supplied TimeoutError as cancellation', async () => {
+    const caller = new AbortController();
+    const original = new DOMException('caller deadline', 'TimeoutError');
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+        }),
+    );
+    const result = apiRequest('groups', { signal: caller.signal, timeoutMs: 5000 });
+    const assertion = expect(result).rejects.toBe(original);
+    caller.abort(original);
+    await assertion;
+  });
+
   it('fails a hanging request with retryable timeout', async () => {
     vi.useFakeTimers();
     try {
