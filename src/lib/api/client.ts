@@ -67,6 +67,12 @@ export type RequestOptions<T = unknown> = {
   readonly signal?: AbortSignal | undefined;
   /** Optional Zod schema to runtime-validate response payload. */
   readonly schema?: z.ZodType<T> | undefined;
+  /**
+   * Optional Zod schema for the fields alongside the page — only meaningful
+   * on `apiRequestPageBody`, where the endpoint documents extra top-level
+   * fields (like `unreadCount`) that a caller must be able to trust.
+   */
+  readonly bodySchema?: z.ZodType<Record<string, unknown>> | undefined;
 };
 
 function url(path: string): string {
@@ -298,5 +304,21 @@ export async function apiRequestPageBody<T>(
     items = validatedItems;
   }
 
-  return { page: { ...page, items }, body: body as Record<string, unknown> };
+  // The page keys are checked; the rest of the body the endpoint documents
+  // is checked too when a caller names its shape — a renamed or wrongly-typed
+  // field must arrive as an error, not as `undefined` read silently.
+  let extra = body as Record<string, unknown>;
+  if (options.bodySchema !== undefined) {
+    const parsed = options.bodySchema.safeParse(extra);
+    if (!parsed.success) {
+      throw new ApiError(
+        status,
+        undefined,
+        `The server returned an unexpected body shape: ${parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join(', ')}`,
+      );
+    }
+    extra = parsed.data;
+  }
+
+  return { page: { ...page, items }, body: extra };
 }

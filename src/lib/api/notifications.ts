@@ -57,15 +57,14 @@ export async function listNotifications(
       token,
       ...(signal ? { signal } : {}),
       schema: notificationSchema,
+      // The count is not derivable from the rows, so it cannot be defaulted:
+      // a missing or malformed one is a contract break, the same as any other
+      // field this client validates.
+      bodySchema: z.object({ unreadCount: z.number() }).passthrough(),
     },
   );
 
-  // A missing or malformed count is reported as zero rather than as `NaN`: a badge
-  // is decoration, and a badge reading "NaN" would be worse than none. The rows
-  // themselves were already validated by the page reader.
-  const unreadCount = typeof body.unreadCount === 'number' ? body.unreadCount : 0;
-
-  return { ...page, unreadCount };
+  return { ...page, unreadCount: body.unreadCount as number };
 }
 
 /**
