@@ -101,4 +101,80 @@ describe('AddressChip accessibility and copy affordance', () => {
     const code = container.querySelector('code');
     expect(code?.getAttribute('aria-label')).toBe(TEST_ADDRESS);
   });
+
+  it('clears copy-feedback timer on unmount and prevents state updates after unmount', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: { writeText },
+    });
+
+    act(() => {
+      root.render(<AddressChip value={TEST_ADDRESS} />);
+    });
+
+    const copyBtn = container.querySelector('button');
+    await act(async () => {
+      copyBtn?.click();
+    });
+
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+    // Unmount while timer is still pending
+    act(() => {
+      root.unmount();
+    });
+
+    // Advance timers past the 2000ms window — must not cause errors or state updates
+    act(() => {
+      vi.advanceTimersByTime(2500);
+    });
+
+    vi.useRealTimers();
+  });
+
+  it('resets timer on rapid consecutive copies providing a full-length confirmation', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: { writeText },
+    });
+
+    act(() => {
+      root.render(<AddressChip value={TEST_ADDRESS} />);
+    });
+
+    const copyBtn = container.querySelector('button');
+    await act(async () => {
+      copyBtn?.click();
+    });
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+    // Advance 1500ms (500ms before original timeout expires)
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+    // Click copy a second time to restart the 2000ms timer
+    await act(async () => {
+      copyBtn?.click();
+    });
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+    // Advance 1000ms (t=2500 from start; original timer would have expired at t=2000)
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    // Feedback must still be active because second copy restarted the timer
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+    // Advance past remaining 1000ms of second timer
+    act(() => {
+      vi.advanceTimersByTime(1001);
+    });
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copy address/i);
+
+    vi.useRealTimers();
+  });
 });
