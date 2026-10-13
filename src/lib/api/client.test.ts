@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { apiRequest, apiRequestPage, apiRequestPageBody } from './client';
+import { apiRequest, apiRequestPage, apiRequestPageBody, MAX_RESPONSE_BODY_BYTES } from './client';
 import { ApiError, apiErrorMessage, isRetryableApiError } from './errors';
 
 /**
@@ -47,6 +47,60 @@ afterEach(() => {
 });
 
 describe('apiRequest', () => {
+  it('rejects an oversized stream despite an understated Content-Length and cancels it', async () => {
+    const cancel = vi.fn().mockRejectedValue(new Error('cancel failed'));
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(MAX_RESPONSE_BODY_BYTES));
+        controller.enqueue(new Uint8Array(1));
+      },
+      cancel,
+    });
+    fetchMock.mockResolvedValue(new Response(stream, { headers: { 'content-length': '1' } }));
+    let error: unknown;
+    try {
+      await apiRequest('large');
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ code: 'response_too_large', status: 200 });
+    expect(apiErrorMessage(error)).toContain('too large');
+    expect(isRetryableApiError(error)).toBe(false);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(stream.locked).toBe(false);
+  });
+
+  it('accepts valid JSON exactly at the byte cap', async () => {
+    const data = 'x'.repeat(
+      MAX_RESPONSE_BODY_BYTES - new TextEncoder().encode(JSON.stringify({ data: '' })).length,
+    );
+    fetchMock.mockResolvedValue(jsonResponse(200, { data }));
+    await expect(apiRequest('exact')).resolves.toBe(data);
+  });
+
+  it('decodes UTF-8 characters split across stream chunks', async () => {
+    const bytes = new TextEncoder().encode(JSON.stringify({ data: '€😀' }));
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const byte of bytes) controller.enqueue(new Uint8Array([byte]));
+        controller.close();
+      },
+    });
+    fetchMock.mockResolvedValue(new Response(stream));
+    await expect(apiRequest('unicode')).resolves.toBe('€😀');
+  });
+
+  it('also caps failed HTTP responses without Content-Length', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(new Uint8Array(MAX_RESPONSE_BODY_BYTES + 1), { status: 502 }),
+    );
+    await expect(apiRequestPage('groups')).rejects.toMatchObject({
+      code: 'response_too_large',
+      status: 502,
+    });
+  });
+
   it('unwraps the data envelope', async () => {
     fetchMock.mockResolvedValue(jsonResponse(200, { data: { code: 'abc' } }));
 

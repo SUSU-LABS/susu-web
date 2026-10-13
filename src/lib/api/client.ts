@@ -91,8 +91,42 @@ function url(path: string): string {
  * that says nothing about the actual problem. Returning `undefined` lets the
  * caller report the status, which is the informative part.
  */
+/** Maximum decoded response body size, measured in bytes (1 MiB). */
+export const MAX_RESPONSE_BODY_BYTES = 1_048_576;
+
+async function readTextBounded(response: Response): Promise<string> {
+  if (response.body === null) return '';
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  const parts: string[] = [];
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      // Count actual decoded bytes; Content-Length can be absent, inaccurate,
+      // or describe compressed bytes rather than the body delivered by fetch.
+      if (bytes > MAX_RESPONSE_BODY_BYTES) {
+        // Cancellation failures must not mask the size error or reject later.
+        void reader.cancel().catch(() => undefined);
+        throw new ApiError(
+          response.status,
+          'response_too_large',
+          `The response body exceeds the ${MAX_RESPONSE_BODY_BYTES}-byte limit.`,
+        );
+      }
+      parts.push(decoder.decode(value, { stream: true }));
+    }
+    parts.push(decoder.decode());
+    return parts.join('');
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 async function readJson(response: Response): Promise<unknown> {
-  const text = await response.text();
+  const text = await readTextBounded(response);
   if (text.length === 0) return undefined;
   try {
     return JSON.parse(text) as unknown;
