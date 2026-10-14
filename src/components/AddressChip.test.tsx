@@ -36,8 +36,8 @@ describe('AddressChip accessibility and copy affordance', () => {
 
     const code = container.querySelector('code');
     expect(code).not.toBeNull();
-    // Accessible name must be the full address, not the truncated text
-    expect(code?.getAttribute('aria-label')).toBe(TEST_ADDRESS);
+    // Must not duplicate accessible name via aria-label
+    expect(code?.hasAttribute('aria-label')).toBe(false);
 
     // Visually-hidden text contains full address for screen readers
     const srOnly = container.querySelector('.sr-only');
@@ -99,6 +99,7 @@ describe('AddressChip accessibility and copy affordance', () => {
 
     expect(container.textContent).toContain('Factory');
     const code = container.querySelector('code');
-    expect(code?.getAttribute('aria-label')).toBe(TEST_ADDRESS);
+    expect(code?.hasAttribute('aria-label')).toBe(false);
+    expect(code?.querySelector('.sr-only')?.textContent).toBe(TEST_ADDRESS);
   });
 });
