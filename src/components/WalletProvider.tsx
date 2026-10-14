@@ -32,6 +32,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<WalletError | undefined>(undefined);
 
   const isMounted = useRef(true);
+  const inFlightConnectRef = useRef<Promise<WalletAccount | undefined> | null>(null);
 
   useEffect(() => {
     isMounted.current = true;
@@ -118,33 +119,44 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const connect = useCallback(async (): Promise<WalletAccount | undefined> => {
-    const target = wallet ?? (await listAvailableWallets())[0];
-
-    if (target === undefined) {
-      setError(new WalletError('unavailable', 'No Stellar wallet was found in this browser.'));
-      setStatus('unavailable');
-      return undefined;
+    if (inFlightConnectRef.current !== null) {
+      return inFlightConnectRef.current;
     }
 
-    setStatus('connecting');
-    setError(undefined);
+    const run = (async (): Promise<WalletAccount | undefined> => {
+      const target = wallet ?? (await listAvailableWallets())[0];
 
-    try {
-      const connected = await target.connect();
-      if (!isMounted.current) return undefined;
-      setWallet(target);
-      setAccount(connected);
-      setStatus('connected');
-      return connected;
-    } catch (cause) {
-      if (!isMounted.current) return undefined;
-      // A declined prompt leaves the session exactly as it was: still
-      // disconnected. It is a decision, not a fault, so it must not be rendered
-      // as a broken state.
-      setError(toWalletError(cause));
-      setStatus('disconnected');
-      return undefined;
-    }
+      if (target === undefined) {
+        setError(new WalletError('unavailable', 'No Stellar wallet was found in this browser.'));
+        setStatus('unavailable');
+        return undefined;
+      }
+
+      setStatus('connecting');
+      setError(undefined);
+
+      try {
+        const connected = await target.connect();
+        if (!isMounted.current) return undefined;
+        setWallet(target);
+        setAccount(connected);
+        setStatus('connected');
+        return connected;
+      } catch (cause) {
+        if (!isMounted.current) return undefined;
+        // A declined prompt leaves the session exactly as it was: still
+        // disconnected. It is a decision, not a fault, so it must not be rendered
+        // as a broken state.
+        setError(toWalletError(cause));
+        setStatus('disconnected');
+        return undefined;
+      } finally {
+        inFlightConnectRef.current = null;
+      }
+    })();
+
+    inFlightConnectRef.current = run;
+    return run;
   }, [wallet]);
 
   const disconnect = useCallback((): void => {
