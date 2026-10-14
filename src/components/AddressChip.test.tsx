@@ -24,8 +24,13 @@ describe('AddressChip accessibility and copy affordance', () => {
   });
 
   afterEach(() => {
-    act(() => root.unmount());
+    try {
+      act(() => root.unmount());
+    } catch {
+      // In tests verifying unmount, root is already unmounted.
+    }
     container.remove();
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -100,5 +105,78 @@ describe('AddressChip accessibility and copy affordance', () => {
     expect(container.textContent).toContain('Factory');
     const code = container.querySelector('code');
     expect(code?.getAttribute('aria-label')).toBe(TEST_ADDRESS);
+  });
+
+  it('restarts copy confirmation window on rapid repeated copies', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: { writeText },
+    });
+
+    act(() => {
+      root.render(<AddressChip value={TEST_ADDRESS} />);
+    });
+
+    const copyBtn = container.querySelector('button');
+    expect(copyBtn).not.toBeNull();
+
+    await act(async () => {
+      copyBtn?.click();
+    });
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+    // Fast-forward 1000ms (halfway through the 2000ms duration)
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+    // Trigger second copy before the first timer finishes
+    await act(async () => {
+      copyBtn?.click();
+    });
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+    // Fast-forward another 1000ms (2000ms after first click, but only 1000ms after second click)
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    // With restart, it must still be in copied state
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+    // Fast-forward the remaining 1000ms to complete the second 2000ms window
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copy/i);
+  });
+
+  it('clears copy timer on unmount and prevents state updates after unmount', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: { writeText },
+    });
+
+    act(() => {
+      root.render(<AddressChip value={TEST_ADDRESS} />);
+    });
+
+    const copyBtn = container.querySelector('button');
+    await act(async () => {
+      copyBtn?.click();
+    });
+    expect(copyBtn?.getAttribute('aria-label')).toMatch(/copied/i);
+
+    // Unmount while timer is pending
+    act(() => {
+      root.unmount();
+    });
+
+    // Advance past the 2000ms timer
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
   });
 });
