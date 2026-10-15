@@ -29,23 +29,31 @@ describe('AddressChip accessibility and copy affordance', () => {
     vi.restoreAllMocks();
   });
 
-  it('exposes the full 56-character address to assistive tech via accessible name', () => {
+  it('exposes the full 56-character address to assistive tech exactly once', () => {
     act(() => {
       root.render(<AddressChip value={TEST_ADDRESS} />);
     });
 
     const code = container.querySelector('code');
     expect(code).not.toBeNull();
-    // Accessible name must be the full address, not the truncated text
-    expect(code?.getAttribute('aria-label')).toBe(TEST_ADDRESS);
+    // No redundant aria-label: the sr-only span is the single source of the accessible name
+    expect(code?.getAttribute('aria-label')).toBeNull();
 
     // Visually-hidden text contains full address for screen readers
-    const srOnly = container.querySelector('.sr-only');
+    const srOnly = code?.querySelector('.sr-only');
     expect(srOnly?.textContent).toBe(TEST_ADDRESS);
 
     // Truncated presentation is aria-hidden
-    const truncated = container.querySelector('[aria-hidden="true"]');
+    const truncated = code?.querySelector('[aria-hidden="true"]');
     expect(truncated?.textContent).toContain('…');
+
+    // The full address occurs exactly once in assistive-tech-visible text
+    const visibleText = Array.from(code?.querySelectorAll('*') ?? [])
+      .filter((el) => el.closest('[aria-hidden="true"]') === null)
+      .map((el) => el.textContent ?? '')
+      .join('');
+    const occurrences = visibleText.split(TEST_ADDRESS).length - 1;
+    expect(occurrences).toBe(1);
   });
 
   it('provides a copy-to-clipboard affordance that copies the full address', async () => {
@@ -99,6 +107,7 @@ describe('AddressChip accessibility and copy affordance', () => {
 
     expect(container.textContent).toContain('Factory');
     const code = container.querySelector('code');
-    expect(code?.getAttribute('aria-label')).toBe(TEST_ADDRESS);
+    expect(code?.getAttribute('aria-label')).toBeNull();
+    expect(code?.querySelector('.sr-only')?.textContent).toBe(TEST_ADDRESS);
   });
 });
