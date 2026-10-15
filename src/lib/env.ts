@@ -14,6 +14,44 @@ export const stellarNetworkSchema = z.enum(['local', 'testnet', 'mainnet']);
 /** Stellar contract addresses are `C` followed by 55 base32 characters. */
 const contractIdSchema = z.union([z.string().regex(/^C[A-Z2-7]{55}$/), z.literal('')]);
 
+/**
+ * True when this code is running in a production build.
+ *
+ * Read at validation time (not module load) so tests can toggle it.
+ */
+function isProductionBuild(): boolean {
+  return import.meta.env.PROD === true;
+}
+
+/** Hostnames that never leave the machine; plain HTTP to them is harmless. */
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+
+/**
+ * A URL that must use HTTPS in production builds.
+ *
+ * These URLs carry the anon key, signed transaction submission, the access
+ * token, and auth redirect targets — any of them over plain HTTP weakens the
+ * session. Loopback hosts stay exempt so local development keeps working.
+ */
+function httpsUrlInProduction() {
+  return z
+    .string()
+    .url()
+    .refine(
+      (url) => {
+        if (!isProductionBuild()) return true;
+        let parsed: URL;
+        try {
+          parsed = new URL(url);
+        } catch {
+          return false;
+        }
+        return parsed.protocol === 'https:' || LOOPBACK_HOSTS.has(parsed.hostname);
+      },
+      { message: 'must use https: in production builds' },
+    );
+}
+
 /** Environment variable names that must never be present in a browser bundle. */
 export const FORBIDDEN_ENV_KEYS = [
   'VITE_SUPABASE_SERVICE_ROLE_KEY',
@@ -26,11 +64,11 @@ export const FORBIDDEN_ENV_KEYS = [
 ] as const;
 
 export const envSchema = z.object({
-  VITE_APP_URL: z.string().url(),
-  VITE_SUPABASE_URL: z.string().url(),
+  VITE_APP_URL: httpsUrlInProduction(),
+  VITE_SUPABASE_URL: httpsUrlInProduction(),
   VITE_SUPABASE_ANON_KEY: z.string().min(1),
   VITE_STELLAR_NETWORK: stellarNetworkSchema,
-  VITE_STELLAR_RPC_URL: z.string().url(),
+  VITE_STELLAR_RPC_URL: httpsUrlInProduction(),
   VITE_FACTORY_CONTRACT_ID: contractIdSchema,
   VITE_USDC_CONTRACT_ID: contractIdSchema,
   VITE_EXPLORER_BASE_URL: z.string().url(),
@@ -40,7 +78,7 @@ export const envSchema = z.object({
    * notifications need one, and those screens say so rather than failing
    * obscurely when it is absent.
    */
-  VITE_API_BASE_URL: z.string().url().optional(),
+  VITE_API_BASE_URL: httpsUrlInProduction().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
