@@ -266,13 +266,18 @@ export async function apiRequestPage<T>(
  * endpoint that does.
  *
  * `pageOf` still validates the page, so a caller cannot be handed an `unreadCount`
- * from a response whose rows were shaped differently than expected.
+ * from a response whose rows were shaped differently than expected. Pass
+ * `bodySchema` to validate the rest of the body the same way: without it the
+ * extra fields are returned unchecked, and a caller reading a required field
+ * (like `unreadCount`) would silently get `undefined` if the server renamed it
+ * or changed its type.
  */
-export async function apiRequestPageBody<T>(
+export async function apiRequestPageBody<T, B = Record<string, unknown>>(
   path: string,
   options: RequestOptions<T> = {},
   itemSchema?: z.ZodType<T>,
-): Promise<{ page: ApiPage<T>; body: Record<string, unknown> }> {
+  bodySchema?: z.ZodType<B>,
+): Promise<{ page: ApiPage<T>; body: B }> {
   const { status, body } = await send(path, options);
 
   const page = pageOf(body);
@@ -298,5 +303,20 @@ export async function apiRequestPageBody<T>(
     items = validatedItems;
   }
 
-  return { page: { ...page, items }, body: body as Record<string, unknown> };
+  let validatedBody: B;
+  if (bodySchema !== undefined) {
+    const bodyResult = bodySchema.safeParse(body);
+    if (!bodyResult.success) {
+      throw new ApiError(
+        status,
+        undefined,
+        `The server returned an unexpected body shape: ${bodyResult.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join(', ')}`,
+      );
+    }
+    validatedBody = bodyResult.data;
+  } else {
+    validatedBody = body as B;
+  }
+
+  return { page: { ...page, items }, body: validatedBody };
 }

@@ -269,6 +269,10 @@ describe('runtime schema validation', () => {
     count: z.number(),
   });
 
+  const bodySchema = z.object({
+    unreadCount: z.number(),
+  });
+
   it('validates apiRequest payload with provided schema', async () => {
     fetchMock.mockResolvedValue(jsonResponse(200, { data: { id: 'test-1', count: 42 } }));
 
@@ -321,5 +325,65 @@ describe('runtime schema validation', () => {
     const { page, body } = await apiRequestPageBody('test', { schema: itemSchema });
     expect(page.items[0]?.id).toBe('test-1');
     expect(body.extraField).toBe('hello');
+  });
+
+  it('returns the body unchecked when no bodySchema is given', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'test-1', count: 5 }],
+        page: { limit: 10, offset: 0, hasMore: false },
+      }),
+    );
+
+    const { body } = await apiRequestPageBody('test', { schema: itemSchema });
+    // A renamed or missing field degrades to `undefined` here — the reason
+    // callers that need a field should pass a bodySchema.
+    expect(body.unreadCount).toBeUndefined();
+  });
+
+  it('rejects a body missing a required extra field when bodySchema is given', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'test-1', count: 5 }],
+        page: { limit: 10, offset: 0, hasMore: false },
+      }),
+    );
+
+    await expect(
+      apiRequestPageBody('test', { schema: itemSchema }, undefined, bodySchema),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('rejects a body with a mistyped extra field when bodySchema is given', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'test-1', count: 5 }],
+        page: { limit: 10, offset: 0, hasMore: false },
+        unreadCount: 'not-a-number',
+      }),
+    );
+
+    await expect(
+      apiRequestPageBody('test', { schema: itemSchema }, undefined, bodySchema),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('passes a valid body through the bodySchema', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'test-1', count: 5 }],
+        page: { limit: 10, offset: 0, hasMore: false },
+        unreadCount: 3,
+      }),
+    );
+
+    const { page, body } = await apiRequestPageBody(
+      'test',
+      { schema: itemSchema },
+      undefined,
+      bodySchema,
+    );
+    expect(page.items).toHaveLength(1);
+    expect(body.unreadCount).toBe(3);
   });
 });
