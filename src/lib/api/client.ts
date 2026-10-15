@@ -85,6 +85,53 @@ function url(path: string): string {
 }
 
 /**
+ * The largest response body `readJson` will buffer.
+ *
+ * API responses are small JSON envelopes; anything past this is a
+ * misconfigured proxy or a wrong endpoint (e.g. the SPA's index.html),
+ * and reading it without a bound lets a huge or hostile response exhaust
+ * memory before the status/JSON checks ever run.
+ */
+export const MAX_RESPONSE_BODY_BYTES = 1_048_576; // 1 MiB
+
+/**
+ * Reads a response body as text, refusing to buffer past
+ * `MAX_RESPONSE_BODY_BYTES`.
+ *
+ * `response.text()` reads the whole body into memory first; a streaming
+ * read lets us stop and release the connection as soon as the limit is
+ * crossed.
+ */
+async function readTextBounded(response: Response): Promise<string> {
+  const stream = response.body;
+  if (stream === null) return '';
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_RESPONSE_BODY_BYTES) {
+        await reader.cancel();
+        throw new ApiError(0, 'response_too_large', 'The response was too large to read.');
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const merged = new Uint8Array(bytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
+}
+
+/**
  * Reads a response body as JSON, or `undefined` if it is not JSON.
  *
  * A 502 from a proxy is HTML, and `response.json()` on it throws a `SyntaxError`
@@ -92,7 +139,7 @@ function url(path: string): string {
  * caller report the status, which is the informative part.
  */
 async function readJson(response: Response): Promise<unknown> {
-  const text = await response.text();
+  const text = await readTextBounded(response);
   if (text.length === 0) return undefined;
   try {
     return JSON.parse(text) as unknown;
