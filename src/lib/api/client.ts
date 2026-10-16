@@ -13,7 +13,7 @@
  * exercise every branch without a browser session or a network.
  *
  * WHAT IS DELIBERATELY ABSENT
- * No retry, and no timeout. Retrying is a policy that depends on the operation —
+ * No retry, and no default timeout. Retrying is a policy that depends on the operation —
  * retrying a redeemed invite is safe, retrying anything that claims a use is not
  * something this layer can judge — and the callers that need it use React Query,
  * which owns that policy. A silent client-side timeout would also be a lie about
@@ -67,6 +67,12 @@ export type RequestOptions<T = unknown> = {
   readonly signal?: AbortSignal | undefined;
   /** Optional Zod schema to runtime-validate response payload. */
   readonly schema?: z.ZodType<T> | undefined;
+  /**
+   * Bound on the whole request in milliseconds. A request that exceeds it
+   * rejects with a retryable timeout error rather than hanging open — a
+   * caller-supplied `signal` still aborts unchanged.
+   */
+  readonly timeoutMs?: number | undefined;
 };
 
 function url(path: string): string {
@@ -123,13 +129,25 @@ async function send(
   if (options.body !== undefined) headers['content-type'] = 'application/json';
   if (options.token !== undefined) headers['authorization'] = `Bearer ${options.token}`;
 
+  // The caller's signal and the timeout are two different aborts and the
+  // distinction must survive: a timeout is a retryable failure, a caller
+  // abort is a cancellation React Query swallows silently.
+  const timeoutSignal =
+    options.timeoutMs === undefined ? undefined : AbortSignal.timeout(options.timeoutMs);
+  const signal =
+    options.signal === undefined
+      ? timeoutSignal
+      : timeoutSignal === undefined
+        ? options.signal
+        : AbortSignal.any([options.signal, timeoutSignal]);
+
   let response: Response;
   try {
     response = await fetch(url(path), {
       method: options.method ?? 'GET',
       headers,
       ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      ...(signal === undefined ? {} : { signal }),
     });
   } catch (error) {
     // A request that never arrived is a distinct failure from one the server
@@ -137,6 +155,13 @@ async function send(
     // other is not. An abort is not a failure and is re-thrown unchanged so
     // React Query handles it as a cancellation.
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      throw new ApiError(
+        0,
+        undefined,
+        `The request timed out after ${options.timeoutMs}ms.`,
+      );
+    }
     throw new ApiError(0, undefined, 'The request could not reach the server.');
   }
 
