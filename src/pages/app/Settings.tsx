@@ -10,7 +10,7 @@ import {
   avatarProblemMessage,
   avatarSignedUrl,
   removeAvatar,
-  uploadAvatar,
+  replaceAvatar,
   type AvatarProblem,
 } from '@/lib/storage/avatar';
 import { useWallet } from '@/lib/wallet/context';
@@ -91,25 +91,17 @@ function ProfileSection({ account }: { account: Account }) {
     setPhotoPending(true);
 
     try {
-      const uploaded = await uploadAvatar(account.userId, file);
-      if (!uploaded.ok) {
-        setPhotoProblem(uploaded.problem);
-        return;
-      }
-
-      // Upload first, then point the profile at it. If the write fails the new
-      // object is removed, so a failure leaves the account exactly as it was
-      // rather than referring to a photo that is not there.
+      // Upload, write and clean up as one operation: a failed write removes
+      // the just-uploaded object, a successful write removes the replaced one.
       try {
-        await updateProfile.mutateAsync({ avatarPath: uploaded.value.path });
+        const uploaded = await replaceAvatar(account.userId, file, avatarPath, (path) =>
+          updateProfile.mutateAsync({ avatarPath: path }),
+        );
+        if (!uploaded.ok) setPhotoProblem(uploaded.problem);
       } catch {
-        await removeAvatar(uploaded.value.path);
-        return;
+        // The write failed; the orphan was already removed inside replaceAvatar
+        // and the mutation's error state describes it.
       }
-
-      // Only now is the replaced object unreferenced. Best effort: a photo that
-      // outlives its replacement is untidy, not broken.
-      if (avatarPath !== null) await removeAvatar(avatarPath);
     } finally {
       setPhotoPending(false);
       if (fileInput.current !== null) fileInput.current.value = '';

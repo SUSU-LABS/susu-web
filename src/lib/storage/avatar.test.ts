@@ -25,6 +25,7 @@ const {
   prepareAvatar,
   randomHex,
   removeAvatar,
+  replaceAvatar,
   sniffImageKind,
   uploadAvatar,
 } = await import('./avatar');
@@ -403,5 +404,38 @@ describe('avatarProblemMessage', () => {
       expect(message.length).toBeGreaterThan(0);
       expect(message.endsWith('.')).toBe(true);
     }
+  });
+});
+
+describe('replaceAvatar', () => {
+  it('removes the just-uploaded object when the write fails', async () => {
+    stubDom();
+    uploadMock.mockResolvedValue({ error: null });
+    removeMock.mockResolvedValue({ error: null });
+    const write = vi.fn(async () => {
+      throw new Error('patch failed');
+    });
+
+    await expect(replaceAvatar(USER, imageBlob('png'), null, write)).rejects.toThrow(
+      'patch failed',
+    );
+
+    expect(removeMock).toHaveBeenCalledTimes(1);
+    const [removed] = removeMock.mock.calls[0] as [string[]];
+    expect(removed).toHaveLength(1);
+    expect(removed[0]).toEqual(expect.stringContaining(`avatar/`));
+  });
+
+  it('removes the superseded object after a successful write', async () => {
+    stubDom();
+    uploadMock.mockResolvedValue({ error: null });
+    removeMock.mockResolvedValue({ error: null });
+    const previous = `users/${USER}/avatar/${randomHex()}.webp`;
+    const write = vi.fn(async () => undefined);
+
+    const result = await replaceAvatar(USER, imageBlob('png'), previous, write);
+
+    expect(result.ok).toBe(true);
+    expect(removeMock).toHaveBeenCalledWith([previous]);
   });
 });

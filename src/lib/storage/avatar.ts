@@ -292,6 +292,37 @@ export async function uploadAvatar(
   return { ok: true, value: { path, kind } };
 }
 
+/**
+ * Uploads a photo, points the profile at it, and keeps storage tidy on every
+ * branch: a failed write removes the just-uploaded object, and a successful
+ * write removes the object it replaced. The write's own error is rethrown so
+ * the caller's mutation state reports it honestly.
+ */
+export async function replaceAvatar(
+  userId: string,
+  file: Blob,
+  previousPath: string | null,
+  write: (path: string) => Promise<unknown>,
+): Promise<AvatarOutcome<{ path: string; kind: ImageKind }>> {
+  const uploaded = await uploadAvatar(userId, file);
+  if (!uploaded.ok) return uploaded;
+
+  try {
+    await write(uploaded.value.path);
+  } catch (error) {
+    // The account still refers to the previous object — without this the new
+    // one is orphaned with no reference to reach it by.
+    await removeAvatar(uploaded.value.path);
+    throw error;
+  }
+
+  // Only now is the replaced object unreferenced. Best effort: a photo that
+  // outlives its replacement is untidy, not broken.
+  if (previousPath !== null) await removeAvatar(previousPath);
+
+  return uploaded;
+}
+
 /** Removes one object. Used when replacing a photo and when clearing it. */
 export async function removeAvatar(path: string): Promise<AvatarOutcome<undefined>> {
   if (path === '') return failure('remove-failed');
