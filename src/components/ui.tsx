@@ -1,5 +1,7 @@
 import {
+  useEffect,
   useId,
+  useRef,
   useState,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
@@ -200,12 +202,23 @@ export function SelectField({
 /** A short, monospaced rendering of an on-chain address with copy affordance and accessible name. */
 export function AddressChip({ value, label }: { value: string; label?: string }) {
   const [copied, setCopied] = useState(false);
+  const feedbackTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // The handle has to be kept so the timer can be cancelled: unmounting with
+  // it live would set state on a dead component, and a second copy inside the
+  // same window would let the first timer's end arrive early.
+  useEffect(() => {
+    return () => {
+      clearTimeout(feedbackTimer.current);
+    };
+  }, []);
 
   async function copy(): Promise<void> {
     try {
       await navigator.clipboard.writeText(value);
+      clearTimeout(feedbackTimer.current);
       setCopied(true);
-      setTimeout(() => {
+      feedbackTimer.current = setTimeout(() => {
         setCopied(false);
       }, 2000);
     } catch {
