@@ -222,7 +222,6 @@ export function AddressChip({ value, label }: { value: string; label?: string })
         title={value}
         className="rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-xs dark:bg-neutral-800"
       >
-        <span className="sr-only">{value}</span>
         <span aria-hidden="true">
           {value.slice(0, 6)}…{value.slice(-4)}
         </span>

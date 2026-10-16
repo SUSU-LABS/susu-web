@@ -39,9 +39,9 @@ describe('AddressChip accessibility and copy affordance', () => {
     // Accessible name must be the full address, not the truncated text
     expect(code?.getAttribute('aria-label')).toBe(TEST_ADDRESS);
 
-    // Visually-hidden text contains full address for screen readers
-    const srOnly = container.querySelector('.sr-only');
-    expect(srOnly?.textContent).toBe(TEST_ADDRESS);
+    // The accessible name comes from the label alone — a screen reader
+    // announces the address once, not label + hidden-text twice.
+    expect(container.querySelector('.sr-only')).toBeNull();
 
     // Truncated presentation is aria-hidden
     const truncated = container.querySelector('[aria-hidden="true"]');
