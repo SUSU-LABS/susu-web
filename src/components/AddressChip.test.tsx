@@ -29,15 +29,17 @@ describe('AddressChip accessibility and copy affordance', () => {
     vi.restoreAllMocks();
   });
 
-  it('exposes the full 56-character address to assistive tech via accessible name', () => {
+  it('exposes the full address once through visually hidden text', () => {
     act(() => {
       root.render(<AddressChip value={TEST_ADDRESS} />);
     });
 
     const code = container.querySelector('code');
     expect(code).not.toBeNull();
-    // Accessible name must be the full address, not the truncated text
-    expect(code?.getAttribute('aria-label')).toBe(TEST_ADDRESS);
+    // Code uses its text content; do not repeat it through an aria-label.
+    expect(code?.hasAttribute('aria-label')).toBe(false);
+    expect(code?.querySelectorAll('.sr-only')).toHaveLength(1);
+    expect(code?.querySelector('.sr-only')?.textContent).toBe(TEST_ADDRESS);
 
     // Visually-hidden text contains full address for screen readers
     const srOnly = container.querySelector('.sr-only');
@@ -99,6 +101,8 @@ describe('AddressChip accessibility and copy affordance', () => {
 
     expect(container.textContent).toContain('Factory');
     const code = container.querySelector('code');
-    expect(code?.getAttribute('aria-label')).toBe(TEST_ADDRESS);
+    expect(code?.hasAttribute('aria-label')).toBe(false);
+    expect(code?.querySelectorAll('.sr-only')).toHaveLength(1);
+    expect(code?.querySelector('.sr-only')?.textContent).toBe(TEST_ADDRESS);
   });
 });
