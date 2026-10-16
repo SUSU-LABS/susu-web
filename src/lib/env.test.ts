@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseEnv } from './env';
 
 /** Builds a minimal valid environment, of the shape a real .env would produce. */
@@ -83,5 +83,30 @@ describe('parseEnv', () => {
     } catch (error) {
       expect(String(error)).not.toContain('super-secret-value');
     }
+  });
+});
+
+describe('https in production', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('rejects an http url in a production build', () => {
+    vi.stubEnv('PROD', true);
+    expect(() => parseEnv(validEnv({ VITE_SUPABASE_URL: 'http://example.supabase.co' }))).toThrow();
+    expect(() => parseEnv(validEnv({ VITE_STELLAR_RPC_URL: 'http://rpc.example.test' }))).toThrow();
+    expect(() => parseEnv(validEnv({ VITE_API_BASE_URL: 'http://api.example.test' }))).toThrow();
+    expect(() => parseEnv(validEnv({ VITE_APP_URL: 'http://app.example.test' }))).toThrow();
+  });
+
+  it('still allows http://localhost during development', () => {
+    const env = parseEnv(validEnv());
+    expect(env.VITE_APP_URL).toBe('http://localhost:5173');
+  });
+
+  it('accepts https urls in a production build', () => {
+    vi.stubEnv('PROD', true);
+    const env = parseEnv(validEnv({ VITE_APP_URL: 'https://app.example.test' }));
+    expect(env.VITE_APP_URL).toBe('https://app.example.test');
   });
 });

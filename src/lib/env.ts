@@ -25,12 +25,25 @@ export const FORBIDDEN_ENV_KEYS = [
   'SERVICE_ROLE_KEY',
 ] as const;
 
+/**
+ * URLs that carry the session, the anon key or signed transaction submissions
+ * may not travel in plaintext. A production build requires `https:`; local
+ * development may still use `http://localhost`.
+ */
+const secureUrl = () =>
+  z
+    .string()
+    .url()
+    .refine((value) => !import.meta.env.PROD || new URL(value).protocol === 'https:', {
+      message: 'must use https in production',
+    });
+
 export const envSchema = z.object({
-  VITE_APP_URL: z.string().url(),
-  VITE_SUPABASE_URL: z.string().url(),
+  VITE_APP_URL: secureUrl(),
+  VITE_SUPABASE_URL: secureUrl(),
   VITE_SUPABASE_ANON_KEY: z.string().min(1),
   VITE_STELLAR_NETWORK: stellarNetworkSchema,
-  VITE_STELLAR_RPC_URL: z.string().url(),
+  VITE_STELLAR_RPC_URL: secureUrl(),
   VITE_FACTORY_CONTRACT_ID: contractIdSchema,
   VITE_USDC_CONTRACT_ID: contractIdSchema,
   VITE_EXPLORER_BASE_URL: z.string().url(),
@@ -40,7 +53,7 @@ export const envSchema = z.object({
    * notifications need one, and those screens say so rather than failing
    * obscurely when it is absent.
    */
-  VITE_API_BASE_URL: z.string().url().optional(),
+  VITE_API_BASE_URL: secureUrl().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
