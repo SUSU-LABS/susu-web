@@ -12,17 +12,19 @@
  * supplies the token, which keeps this module free of Supabase and lets the tests
  * exercise every branch without a browser session or a network.
  *
- * WHAT IS DELIBERATELY ABSENT
- * No retry, and no timeout. Retrying is a policy that depends on the operation —
- * retrying a redeemed invite is safe, retrying anything that claims a use is not
- * something this layer can judge — and the callers that need it use React Query,
- * which owns that policy. A silent client-side timeout would also be a lie about
- * what happened to the request: the browser cancels its interest, not the
- * request, so the server may still have acted.
+ * DEADLINES AND RETRIES
+ * A deadline bounds both fetching headers and reading the body. Timing out only
+ * cancels the browser's interest: the server may still have acted. A timeout is
+ * reported distinctly, never as a definite failure to perform the operation.
+ * This layer does not retry. Callers own retry policy; writes may be unsafe to
+ * repeat when their outcome is unknown.
  */
 import { z } from 'zod';
 import { getEnv } from '../env';
 import { ApiError } from './errors';
+
+/** Default deadline for headers and body together. */
+export const DEFAULT_API_TIMEOUT_MS = 30_000;
 
 /** The JSON envelope every successful response uses. */
 type SuccessBody<T> = { data: T };
@@ -65,6 +67,8 @@ export type RequestOptions<T = unknown> = {
   readonly token?: string | undefined;
   /** Aborts the request. A cancelled request never resolves. */
   readonly signal?: AbortSignal | undefined;
+  /** Positive deadline in milliseconds, defaulting to 30 seconds. */
+  readonly timeoutMs?: number;
   /** Optional Zod schema to runtime-validate response payload. */
   readonly schema?: z.ZodType<T> | undefined;
 };
@@ -123,34 +127,70 @@ async function send(
   if (options.body !== undefined) headers['content-type'] = 'application/json';
   if (options.token !== undefined) headers['authorization'] = `Bearer ${options.token}`;
 
-  let response: Response;
-  try {
-    response = await fetch(url(path), {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_API_TIMEOUT_MS;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647) {
+    throw new RangeError('timeoutMs must be positive and no greater than 2147483647.');
+  }
+  const requestUrl = url(path);
+  const requestBody = options.body === undefined ? undefined : JSON.stringify(options.body);
+  if (options.signal?.aborted) throw options.signal.reason;
+
+  const controller = new AbortController();
+  let rejectAbort!: (reason: unknown) => void;
+  const interrupted = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject;
+  });
+  const abort = (reason: unknown): void => {
+    if (controller.signal.aborted) return;
+    controller.abort(reason);
+    rejectAbort(reason);
+  };
+  const onCallerAbort = (): void => abort(options.signal?.reason);
+  options.signal?.addEventListener('abort', onCallerAbort, { once: true });
+  const timer = setTimeout(
+    () =>
+      abort(
+        new ApiError(
+          0,
+          'timeout',
+          'The request timed out. The server may still have acted; check its outcome before retrying.',
+        ),
+      ),
+    timeoutMs,
+  );
+
+  const request = async (): Promise<{ status: number; body: unknown }> => {
+    const response = await fetch(requestUrl, {
       method: options.method ?? 'GET',
       headers,
-      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      ...(requestBody === undefined ? {} : { body: requestBody }),
+      signal: controller.signal,
     });
+    controller.signal.throwIfAborted();
+    const body = await readJson(response);
+    if (!response.ok) {
+      throw new ApiError(
+        response.status,
+        codeOf(body),
+        `Request failed with status ${response.status}`,
+      );
+    }
+    return { status: response.status, body };
+  };
+
+  try {
+    return await Promise.race([request(), interrupted]);
   } catch (error) {
-    // A request that never arrived is a distinct failure from one the server
-    // refused, and the difference matters to the user: one is worth retrying, the
-    // other is not. An abort is not a failure and is re-thrown unchanged so
-    // React Query handles it as a cancellation.
-    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    // Preserve caller cancellation (including custom reasons), while a deadline
+    // is a distinct retryable transport error. No automatic retry occurs here.
+    if (controller.signal.aborted) throw controller.signal.reason;
+    if (error instanceof ApiError || (error instanceof DOMException && error.name === 'AbortError'))
+      throw error;
     throw new ApiError(0, undefined, 'The request could not reach the server.');
+  } finally {
+    clearTimeout(timer);
+    options.signal?.removeEventListener('abort', onCallerAbort);
   }
-
-  const body = await readJson(response);
-
-  if (!response.ok) {
-    throw new ApiError(
-      response.status,
-      codeOf(body),
-      `Request failed with status ${response.status}`,
-    );
-  }
-
-  return { status: response.status, body };
 }
 
 function hasData(body: unknown): body is SuccessBody<unknown> {
