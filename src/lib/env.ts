@@ -31,6 +31,8 @@ export const envSchema = z.object({
   VITE_SUPABASE_ANON_KEY: z.string().min(1),
   VITE_STELLAR_NETWORK: stellarNetworkSchema,
   VITE_STELLAR_RPC_URL: z.string().url(),
+  /** Explicitly trust a custom host after verifying its network passphrase. */
+  VITE_STELLAR_RPC_IS_CUSTOM: z.enum(['true', 'false']).optional(),
   VITE_FACTORY_CONTRACT_ID: contractIdSchema,
   VITE_USDC_CONTRACT_ID: contractIdSchema,
   VITE_EXPLORER_BASE_URL: z.string().url(),
