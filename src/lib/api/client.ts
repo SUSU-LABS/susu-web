@@ -266,13 +266,18 @@ export async function apiRequestPage<T>(
  * endpoint that does.
  *
  * `pageOf` still validates the page, so a caller cannot be handed an `unreadCount`
- * from a response whose rows were shaped differently than expected.
+ * from a response whose rows were shaped differently than expected. Supply
+ * `bodySchema` to validate and type endpoint-specific metadata as well.
  */
-export async function apiRequestPageBody<T>(
+export async function apiRequestPageBody<
+  T,
+  B extends Record<string, unknown> = Record<string, unknown>,
+>(
   path: string,
   options: RequestOptions<T> = {},
   itemSchema?: z.ZodType<T>,
-): Promise<{ page: ApiPage<T>; body: Record<string, unknown> }> {
+  bodySchema?: z.ZodType<B>,
+): Promise<{ page: ApiPage<T>; body: B }> {
   const { status, body } = await send(path, options);
 
   const page = pageOf(body);
@@ -298,5 +303,12 @@ export async function apiRequestPageBody<T>(
     items = validatedItems;
   }
 
-  return { page: { ...page, items }, body: body as Record<string, unknown> };
+  if (bodySchema !== undefined) {
+    const result = bodySchema.safeParse(body);
+    if (!result.success) {
+      throw new ApiError(status, undefined, 'The server returned unexpected page metadata.');
+    }
+    return { page: { ...page, items }, body: result.data };
+  }
+  return { page: { ...page, items }, body: body as B };
 }
