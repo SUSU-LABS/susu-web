@@ -155,6 +155,37 @@ describe('AuthProvider session observation', () => {
     expect(mocks.getSession).toHaveBeenCalledTimes(2);
   });
 
+  it('settles to anonymous after a rejected refresh and can refresh again', async () => {
+    await mount();
+    await act(async () => firstRead.resolve({ data: { session: session('old-user') } }));
+    mocks.getSession.mockRejectedValueOnce(new Error('session read failed'));
+
+    await act(async () => {
+      await expect(auth.refresh()).resolves.toBeUndefined();
+    });
+
+    expect(state()).toEqual({ status: 'anonymous', user: 'none' });
+
+    mocks.getSession.mockResolvedValueOnce({ data: { session: session('recovered-user') } });
+    await act(async () => auth.refresh());
+
+    expect(state()).toEqual({ status: 'authenticated', user: 'recovered-user' });
+  });
+
+  it('handles a synchronous client failure during refresh', async () => {
+    await mount();
+    await act(async () => firstRead.resolve({ data: { session: session('old-user') } }));
+    mocks.getSupabaseClient.mockImplementationOnce(() => {
+      throw new Error('client unavailable');
+    });
+
+    await act(async () => {
+      await expect(auth.refresh()).resolves.toBeUndefined();
+    });
+
+    expect(state()).toEqual({ status: 'anonymous', user: 'none' });
+  });
+
   it('drops the local session when sign-out reports a revocation failure', async () => {
     await mount();
     await act(async () => firstRead.resolve({ data: { session: session('signed-in-user') } }));
