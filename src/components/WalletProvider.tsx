@@ -32,6 +32,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<WalletError | undefined>(undefined);
 
   const isMounted = useRef(true);
+  const inflight = useRef<Promise<WalletAccount | undefined> | undefined>(
+    undefined,
+  );
 
   useEffect(() => {
     isMounted.current = true;
@@ -118,6 +121,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const connect = useCallback(async (): Promise<WalletAccount | undefined> => {
+    // A second click while the first prompt is still open must not issue a
+    // second prompt — both callers join the attempt already in flight and get
+    // the same result.
+    if (inflight.current !== undefined) {
+      return inflight.current;
+    }
     const target = wallet ?? (await listAvailableWallets())[0];
 
     if (target === undefined) {
@@ -129,22 +138,28 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setStatus('connecting');
     setError(undefined);
 
-    try {
-      const connected = await target.connect();
-      if (!isMounted.current) return undefined;
-      setWallet(target);
-      setAccount(connected);
-      setStatus('connected');
-      return connected;
-    } catch (cause) {
-      if (!isMounted.current) return undefined;
-      // A declined prompt leaves the session exactly as it was: still
-      // disconnected. It is a decision, not a fault, so it must not be rendered
-      // as a broken state.
-      setError(toWalletError(cause));
-      setStatus('disconnected');
-      return undefined;
-    }
+    inflight.current = (async () => {
+      try {
+        const connected = await target.connect();
+        if (!isMounted.current) return undefined;
+        setWallet(target);
+        setAccount(connected);
+        setStatus('connected');
+        return connected;
+      } catch (cause) {
+        if (!isMounted.current) return undefined;
+        // A declined prompt leaves the session exactly as it was: still
+        // disconnected. It is a decision, not a fault, so it must not be
+        // rendered as a broken state.
+        setError(toWalletError(cause));
+        setStatus('disconnected');
+        return undefined;
+      } finally {
+        inflight.current = undefined;
+      }
+    })();
+
+    return inflight.current;
   }, [wallet]);
 
   const disconnect = useCallback((): void => {
