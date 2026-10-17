@@ -1,12 +1,13 @@
 /**
  * @vitest-environment jsdom
  */
-import { act } from 'react';
+import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getConnectedAccount: vi.fn(),
+  connect: vi.fn(),
 }));
 
 vi.mock('@/lib/wallet', async (importOriginal) => {
@@ -18,7 +19,7 @@ vi.mock('@/lib/wallet', async (importOriginal) => {
         id: 'freighter',
         name: 'Freighter',
         isAvailable: vi.fn(async () => true),
-        connect: vi.fn(),
+        connect: mocks.connect,
         getConnectedAccount: mocks.getConnectedAccount,
         signTransaction: vi.fn(),
         signMessage: vi.fn(),
@@ -92,5 +93,100 @@ describe('WalletProvider account refresh', () => {
 
     expect(container.querySelector('output')?.textContent).toBe('none');
     expect(container.querySelector('output')?.dataset.status).toBe('disconnected');
+  });
+
+  it('guards concurrent connect() calls, returning the in-flight promise and prompting once', async () => {
+    let resolveConnect!: (val: { address: string }) => void;
+    mocks.connect.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveConnect = resolve;
+        }),
+    );
+    mocks.getConnectedAccount.mockResolvedValue(null);
+
+    let connectFn!: () => Promise<unknown>;
+    function TestConsumer() {
+      const wallet = useWallet();
+      useEffect(() => {
+        connectFn = wallet.connect;
+      }, [wallet.connect]);
+      return <output data-status={wallet.status}>{wallet.address ?? 'none'}</output>;
+    }
+
+    await act(async () => {
+      root.render(
+        <WalletProvider>
+          <TestConsumer />
+        </WalletProvider>,
+      );
+    });
+
+    let p1!: Promise<unknown>;
+    let p2!: Promise<unknown>;
+    act(() => {
+      p1 = connectFn();
+      p2 = connectFn();
+    });
+
+    // Both calls must return the identical promise instance
+    expect(p1).toBe(p2);
+
+    // Adapter's connect prompt must be called exactly once
+    expect(mocks.connect).toHaveBeenCalledTimes(1);
+
+    // Resolve deferred prompt
+    await act(async () => {
+      resolveConnect({ address: 'GCONCURRENT' });
+      await p1;
+    });
+
+    expect(container.querySelector('output')?.textContent).toBe('GCONCURRENT');
+    expect(container.querySelector('output')?.dataset.status).toBe('connected');
+
+    // Subsequent call after settling triggers a new prompt cleanly
+    mocks.connect.mockResolvedValue({ address: 'GNEW' });
+    await act(async () => {
+      await connectFn();
+    });
+    expect(mocks.connect).toHaveBeenCalledTimes(2);
+  });
+
+  it('resets in-flight lock on connect failure allowing subsequent retry', async () => {
+    mocks.connect.mockRejectedValueOnce(new Error('User declined'));
+    mocks.getConnectedAccount.mockResolvedValue(null);
+
+    let connectFn!: () => Promise<unknown>;
+    function TestConsumer() {
+      const wallet = useWallet();
+      useEffect(() => {
+        connectFn = wallet.connect;
+      }, [wallet.connect]);
+      return <output data-status={wallet.status}>{wallet.address ?? 'none'}</output>;
+    }
+
+    await act(async () => {
+      root.render(
+        <WalletProvider>
+          <TestConsumer />
+        </WalletProvider>,
+      );
+    });
+
+    await act(async () => {
+      await connectFn();
+    });
+
+    expect(container.querySelector('output')?.dataset.status).toBe('disconnected');
+
+    // Retry must work and invoke connect again
+    mocks.connect.mockResolvedValueOnce({ address: 'GRETRY' });
+    await act(async () => {
+      await connectFn();
+    });
+
+    expect(container.querySelector('output')?.textContent).toBe('GRETRY');
+    expect(container.querySelector('output')?.dataset.status).toBe('connected');
+    expect(mocks.connect).toHaveBeenCalledTimes(2);
   });
 });
